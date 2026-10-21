@@ -1,0 +1,27 @@
+# docker compose up -d  →  http://localhost:8000/auth?token=$RGCOPY_TOKEN
+services:
+  rgcopy:
+    build: .
+    image: rgcopy:latest
+    # Rebuild on every `up` so a `git pull` is always picked up (unchanged layers come from cache)
+    pull_policy: build
+    container_name: rgcopy
+    ports:
+      - "8000:8000"
+    environment:
+      # Required: the access token for the web UI (put it in .env)
+      RGCOPY_TOKEN: ${RGCOPY_TOKEN:?Set RGCOPY_TOKEN in .env}
+      # Only when a reverse proxy in front already authenticates users:
+      # RGCOPY_AUTH: "off"
+      # FORWARDED_ALLOW_IPS: "172.16.0.0/12"
+    volumes:
+      # Every folder RGCopy may copy from or to lives under /media
+      - ${DISK_A:-./media/a}:/media/a
+      - ${DISK_B:-./media/b}:/media/b
+      - rgcopy-config:/config
+    # Copied files are written as this user: match the owner of the folders (`id -u` / `id -g`)
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+
+volumes:
+  rgcopy-config:

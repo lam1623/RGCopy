@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rgcopy"
+# Single source: __version__ in rgcopy/__init__.py
+dynamic = ["version"]
+description = "File copy queue for Linux powered by rsync, with a web UI that runs as a desktop app or in Docker"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Reinier Reisy Quevedo Batista", email = "reisyreinier@gmail.com" },
+  { name = "Lino Alfonso", email = "lleisdier.alfonso@gmail.com" },
+]
+keywords = ["rsync", "copy", "move", "file-manager", "nautilus", "transfer"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: System :: Archiving :: Mirroring",
+  "Framework :: FastAPI",
+]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "pydantic>=2.7,<3",
+  "platformdirs>=4,<5",
+]
+
+[project.optional-dependencies]
+# Native window; on Linux the Qt backend installs cleanly from wheels
+desktop = ["pywebview>=5.3", "pywebview[qt]>=5.3; sys_platform == 'linux'"]
+dev = ["pytest>=8,<9", "pytest-asyncio>=0.24", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
+
+[project.scripts]
+rgcopy = "rgcopy.cli:main"
+
+[tool.hatch.version]
+path = "rgcopy/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rgcopy"]
+# The SPA bundle is gitignored but must ship inside the wheel
+artifacts = ["rgcopy/web/dist/**"]
+
+[tool.hatch.build.targets.sdist]
+include = ["rgcopy", "tests", "README.md", "pyproject.toml"]
+artifacts = ["rgcopy/web/dist/**"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["legacy", "frontend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ASYNC", "E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["rgcopy"]
+plugins = ["pydantic.mypy"]
+disallow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+ignore_missing_imports = true
