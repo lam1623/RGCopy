@@ -2,14 +2,17 @@ import { useId } from "react";
 import { SPEED_SAMPLES } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+// Never stretch fewer samples than this over the whole width (a lone sample is not a trend)
+const MIN_SPAN = 24;
+
 /** Area chart of the transfer speed, newest sample on the right (like a copy dialog). */
 export function SpeedChart({ samples, paused, className }: { samples: number[]; paused?: boolean; className?: string }) {
   const id = useId();
   const width = 300;
   const height = 64;
   const peak = Math.max(1, ...samples) * 1.15;
-  // Fixed horizontal scale: the chart fills up from the left as the copy goes on
-  const step = width / (SPEED_SAMPLES - 1);
+  // Few samples stretch across the chart; once it is full it scrolls (newest on the right)
+  const step = width / Math.max(MIN_SPAN, Math.min(SPEED_SAMPLES, samples.length) - 1);
   const points = samples.map((value, index) => {
     const x = width - (samples.length - 1 - index) * step;
     const y = height - (value / peak) * (height - 4);

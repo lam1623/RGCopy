@@ -96,9 +96,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     integrate.add_argument("--uninstall", action="store_true", help="remove what `integrate` added")
     integrate.add_argument(
+        "--no-takeover",
+        action="store_true",
+        help="leave Ctrl+V to the file manager (RGCopy pastes with Ctrl+Shift+V or the Scripts menu)",
+    )
+    integrate.add_argument(
         "--accel",
         default=integration.DEFAULT_ACCEL,
-        help=f"Nautilus shortcut, '' for none (default: {integration.DEFAULT_ACCEL})",
+        help=f"extra Nautilus shortcut, '' for none (default: {integration.DEFAULT_ACCEL})",
     )
     return parser
 
@@ -314,12 +319,26 @@ def cmd_paste(args: argparse.Namespace) -> int:
 
 
 def cmd_integrate(args: argparse.Namespace) -> int:
-    paths = integration.uninstall() if args.uninstall else integration.install(args.accel or None)
-    verb = "Removed" if args.uninstall else "Installed"
-    for path in paths:
-        print(f"{verb} {path}")
-    if not args.uninstall:
-        print('\nRestart the file manager (e.g. `nautilus -q`) to see "Paste with RGCopy".')
+    if args.uninstall:
+        closed = integration.quit_file_managers(["nemo", "caja"])
+        for path in integration.uninstall():
+            print(f"Removed {path}")
+        warnings: list[str] = []
+    else:
+        takeover = not args.no_takeover
+        closed = integration.quit_file_managers(["nautilus", "nemo", "caja"] if takeover else [])
+        paths, warnings = integration.install(args.accel or None, takeover=takeover)
+        for path in paths:
+            print(f"Installed {path}")
+        if takeover:
+            print("\nCtrl+C / Ctrl+X in the file manager, then Ctrl+V: RGCopy copies or moves the files.")
+        print('"Paste with RGCopy" is also in the right-click menu, under Scripts.')
+    for warning in warnings:
+        print(f"\nwarning: {warning}", file=sys.stderr)
+    if closed:
+        print(f"\nClosed {', '.join(closed)} so the change applies: open it again.")
+    else:
+        print("\nRestart the file manager if it is open (e.g. `nautilus -q`).")
     return 0
 
 

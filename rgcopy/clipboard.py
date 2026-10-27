@@ -14,6 +14,8 @@ Action = Literal["copy", "cut"]
 
 # GNOME-family file managers put "copy|cut" followed by one URI per line in this target
 GNOME_TARGET = "x-special/gnome-copied-files"
+# Caja (MATE) uses the same payload under its own name
+MATE_TARGET = "x-special/mate-copied-files"
 # KDE marks a cut with this target ("1") next to a plain URI list
 KDE_CUT_TARGET = "application/x-kde-cutselection"
 URI_LIST_TARGET = "text/uri-list"
@@ -114,8 +116,9 @@ def read() -> ClipboardFiles:
         return ClipboardFiles()
     name, list_cmd, read_cmd = reader
     targets = set((_run(list_cmd) or "").split())
-    if GNOME_TARGET in targets:
-        files = parse_gnome(_run([*read_cmd, GNOME_TARGET]) or "")
+    special = next((t for t in (GNOME_TARGET, MATE_TARGET) if t in targets), None)
+    if special:
+        files = parse_gnome(_run([*read_cmd, special]) or "")
     elif URI_LIST_TARGET in targets:
         files = parse_gnome(_run([*read_cmd, URI_LIST_TARGET]) or "")
         if KDE_CUT_TARGET in targets and (_run([*read_cmd, KDE_CUT_TARGET]) or "").strip() == "1":
