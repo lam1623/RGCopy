@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.lam1623.rgcopy</id>
+  <name>RGCopy</name>
+  <summary>Copy and move files with rsync, like TeraCopy</summary>
+  <summary xml:lang="es">Copia y mueve archivos con rsync, como TeraCopy</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <developer id="io.github.lam1623">
+    <name>Lino Alfonso</name>
+  </developer>
+  <description>
+    <p>
+      RGCopy takes over Ctrl+V in your file manager: copy or cut files in Nautilus, Nemo or Caja,
+      paste them, and RGCopy copies them with rsync in one window that lists every transfer.
+    </p>
+    <ul>
+      <li>Pause, resume, skip a file or cancel, and run an interrupted copy again to finish only what is missing</li>
+      <li>A bar for the current file and one for the whole list, a live speed chart and the time left</li>
+      <li>Asks once, before copying, what to do with files that already exist</li>
+      <li>Checksum verification, and close or shut down when everything is done</li>
+      <li>Moves within one disk are instant</li>
+    </ul>
+    <p xml:lang="es">
+      RGCopy toma el Ctrl+V de tu gestor de archivos: copia o corta en Nautilus, Nemo o Caja, pega,
+      y RGCopy hace la copia con rsync en una ventana que lista todas las transferencias.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.lam1623.rgcopy.desktop</launchable>
+  <url type="homepage">https://github.com/lam1623/RGCopy</url>
+  <url type="bugtracker">https://github.com/lam1623/RGCopy/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>A copy in progress with the list of transfers</caption>
+      <image>https://raw.githubusercontent.com/lam1623/RGCopy/standalone/docs/screenshots/copying.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Files that already exist at the destination</caption>
+      <image>https://raw.githubusercontent.com/lam1623/RGCopy/standalone/docs/screenshots/conflict.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>Utility</category>
+    <category>FileTools</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="2.0.0" date="2026-10-27">
+      <description>
+        <p>A full rebuild on rsync: Ctrl+V in the file manager, a TeraCopy-style window with a list of
+        transfers, conflict questions, skipping, verification and packages for every distribution.</p>
+      </description>
+    </release>
+  </releases>
+</component>

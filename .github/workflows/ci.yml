@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [standalone]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install rsync
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rsync
+      - run: pip install -e ".[dev]"
+      - run: ruff check rgcopy tests
+      - run: ruff format --check rgcopy tests
+      - run: mypy
+      - run: pytest -q
+
+  frontend:
+    name: Web UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-ui
+          path: rgcopy/web/dist
+          retention-days: 7
+
+  file-managers:
+    name: Ctrl+V in Nautilus, Nemo and Caja
+    needs: [backend]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the file managers and an X server
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rsync nautilus python3-nautilus gir1.2-gtk-4.0 \
+            nemo caja xvfb xdotool xclip dbus-x11 at-spi2-core
+      - run: pip install --user --break-system-packages .
+      - run: tests/e2e/paste_takeover.sh
+
+  docker:
+    name: Docker image
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: rgcopy:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test
+        run: |
+          docker run -d --name rgcopy -p 8000:8000 -e RGCOPY_TOKEN=ci rgcopy:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8000/api/health && break; sleep 1; done
+          curl -fsS localhost:8000/ | grep -q '<div id="root">'
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/system)" = 401
+          curl -fsS -H 'Authorization: Bearer ci' localhost:8000/api/system | grep -q '"available":true'
+      - if: always()
+        run: docker logs rgcopy || true

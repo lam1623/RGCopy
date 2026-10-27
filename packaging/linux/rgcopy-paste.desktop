@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+Actions=rgcopyPaste;
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+
+[Desktop Action rgcopyPaste]
+Name=Paste with RGCopy
+Name[es]=Pegar con RGCopy
+Icon=io.github.lam1623.rgcopy
+Exec=rgcopy paste %f

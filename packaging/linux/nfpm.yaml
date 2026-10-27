@@ -1,0 +1,187 @@
+# nfpm config for the .deb, .rpm and Arch packages; package.sh runs it inside the packaging image.
+# The app is self-contained in /opt/rgcopy; only libraries every desktop has come from the system.
+name: rgcopy
+arch: amd64
+platform: linux
+version: ${VERSION}
+release: 1
+section: utils
+priority: optional
+maintainer: Lino Alfonso <lleisdier.alfonso@gmail.com>
+vendor: Lino Alfonso
+homepage: https://github.com/lam1623/RGCopy
+license: GPL-3.0-only
+description: |-
+  File copy queue for Linux powered by rsync.
+  Ctrl+C and Ctrl+V in Nautilus, Nemo or Caja copy through RGCopy, like TeraCopy on
+  Windows: one window with every transfer, pause, skip and resume, the speed and the time
+  left, a question before replacing existing files, and checksum verification.
+
+contents:
+  - src: ./rgcopy/
+    dst: /opt/rgcopy
+    type: tree
+  - src: /opt/rgcopy/rgcopy
+    dst: /usr/bin/rgcopy
+    type: symlink
+  - src: ./io.github.lam1623.rgcopy.desktop
+    dst: /usr/share/applications/io.github.lam1623.rgcopy.desktop
+  - src: ./io.github.lam1623.rgcopy.metainfo.xml
+    dst: /usr/share/metainfo/io.github.lam1623.rgcopy.metainfo.xml
+  # "Paste with RGCopy" in Dolphin's menu for every user (Plasma 6)
+  - src: ./rgcopy-paste.desktop
+    dst: /usr/share/kio/servicemenus/rgcopy-paste.desktop
+    file_info:
+      mode: 0755
+  - src: ./icons/hicolor/
+    dst: /usr/share/icons/hicolor
+    type: tree
+  - src: ./copyright
+    dst: /usr/share/doc/rgcopy/copyright
+    packager: deb
+  - src: ./LICENSE
+    dst: /usr/share/licenses/rgcopy/LICENSE
+    packager: rpm
+  - src: ./LICENSE
+    dst: /usr/share/licenses/rgcopy/LICENSE
+    packager: archlinux
+
+overrides:
+  # Exactly what the bundle links to outside itself, and the glibc and libstdc++ versions it was
+  # built against (package.sh checks the rpm list below; keep the deb and Arch lists in step)
+  deb:
+    depends:
+      - rsync (>= 3.1)
+      - libasound2t64 | libasound2
+      - libc6 (>= 2.35)
+      - libdbus-1-3
+      - libegl1
+      - libexpat1
+      - libfontconfig1
+      - libfreetype6
+      - libgbm1
+      - libgcc-s1
+      - libgl1
+      - libglib2.0-0t64 | libglib2.0-0
+      - libnspr4
+      - libnss3
+      - libssl3t64 | libssl3
+      - libstdc++6 (>= 11)
+      - libudev1
+      - libuuid1
+      - libwayland-client0
+      - libwayland-cursor0
+      - libwayland-egl1
+      - libx11-6
+      - libx11-xcb1
+      - libxcb-dri3-0
+      - libxcb-glx0
+      - libxcb-sync1
+      - libxcb1
+      - libxcomposite1
+      - libxdamage1
+      - libxext6
+      - libxfixes3
+      - libxrandr2
+      - libxtst6
+      - zlib1g
+    recommends:
+      # Reading what the file manager copied: Wayland and X11
+      - wl-clipboard
+      - xclip
+      - xdg-utils
+    suggests:
+      # Ctrl+V through RGCopy in Nautilus (`rgcopy integrate`)
+      - python3-nautilus
+      - gir1.2-gtk-4.0
+  rpm:
+    depends:
+      - /usr/bin/rsync
+      - libasound.so.2()(64bit)
+      - libc.so.6(GLIBC_2.35)(64bit)
+      - libcrypto.so.3()(64bit)
+      - libdbus-1.so.3()(64bit)
+      - libEGL.so.1()(64bit)
+      - libexpat.so.1()(64bit)
+      - libfontconfig.so.1()(64bit)
+      - libfreetype.so.6()(64bit)
+      - libgbm.so.1()(64bit)
+      - libgcc_s.so.1()(64bit)
+      - libGL.so.1()(64bit)
+      - libglib-2.0.so.0()(64bit)
+      - libgthread-2.0.so.0()(64bit)
+      - libnspr4.so()(64bit)
+      - libnss3.so()(64bit)
+      - libnssutil3.so()(64bit)
+      - libsmime3.so()(64bit)
+      - libssl.so.3()(64bit)
+      - libstdc++.so.6()(64bit)
+      - libstdc++.so.6(GLIBCXX_3.4.29)(64bit)
+      - libudev.so.1()(64bit)
+      - libuuid.so.1()(64bit)
+      - libwayland-client.so.0()(64bit)
+      - libwayland-cursor.so.0()(64bit)
+      - libwayland-egl.so.1()(64bit)
+      - libX11.so.6()(64bit)
+      - libX11-xcb.so.1()(64bit)
+      - libxcb.so.1()(64bit)
+      - libxcb-dri3.so.0()(64bit)
+      - libxcb-glx.so.0()(64bit)
+      - libxcb-sync.so.1()(64bit)
+      - libXcomposite.so.1()(64bit)
+      - libXdamage.so.1()(64bit)
+      - libXext.so.6()(64bit)
+      - libXfixes.so.3()(64bit)
+      - libXrandr.so.2()(64bit)
+      - libXtst.so.6()(64bit)
+      - libz.so.1()(64bit)
+      # Chromium draws no text at all without a system font, even with the UI's own web fonts
+      - liberation-fonts
+    recommends:
+      - wl-clipboard
+      - xclip
+      - xdg-utils
+    suggests:
+      - nautilus-python
+  archlinux:
+    depends:
+      - rsync
+      - alsa-lib
+      - dbus
+      - expat
+      - fontconfig
+      - freetype2
+      - gcc-libs
+      - glib2
+      - glibc
+      - libglvnd
+      - libx11
+      - libxcb
+      - libxcomposite
+      - libxdamage
+      - libxext
+      - libxfixes
+      - libxrandr
+      - libxtst
+      - mesa
+      - nspr
+      - nss
+      - openssl
+      - systemd-libs
+      - ttf-font
+      - util-linux-libs
+      - wayland
+      - zlib
+    suggests:
+      - "wl-clipboard: paste from the file manager on Wayland"
+      - "xclip: paste from the file manager on X11"
+      - "python-nautilus: Ctrl+V through RGCopy in Nautilus"
+
+deb:
+  compression: xz
+rpm:
+  summary: File copy queue for Linux powered by rsync
+  group: Applications/File
+  compression: xz
+archlinux:
+  packager: Lino Alfonso <lleisdier.alfonso@gmail.com>

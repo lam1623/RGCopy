@@ -1,0 +1,252 @@
+name: Packages and releases
+
+# Builds the .deb, .rpm, Arch and portable packages and installs each one on fresh containers of
+# its distributions. The push that changes __version__ (rgcopy/__init__.py) on standalone, a v*
+# tag or a run started by hand then publishes that version: the Docker image for amd64 and arm64
+# is pushed to ghcr.io and tried first, and only then the GitHub release gets every package.
+on:
+  push:
+    branches: [standalone]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "packaging/linux/**"
+      - ".github/workflows/packages.yml"
+      - ".github/release-notes.md"
+      - "pyproject.toml"
+      - "rgcopy/__init__.py"
+      - "Dockerfile"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A pull request keeps only its newest run; every push runs to the end on its own, so a version
+  # bump is never dropped while earlier pushes are still building
+  group: packages-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/linux/Dockerfile
+          outputs: type=local,dest=dist/linux
+          # Otherwise BuildKit adds its provenance.json next to the packages (and to the release)
+          provenance: false
+          cache-from: type=gha,scope=linux-packages
+          cache-to: type=gha,scope=linux-packages,mode=max
+      - id: version
+        name: Read the version
+        run: |
+          deb=$(basename dist/linux/rgcopy_*-1_amd64.deb)
+          version=${deb#rgcopy_}
+          version=${version%-1_amd64.deb}
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "The tag $GITHUB_REF_NAME does not match the version $version" >&2
+            exit 1
+          fi
+      - run: ls -l dist/linux && cat dist/linux/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/linux
+          compression-level: 0
+          retention-days: 30
+
+  test:
+    name: Test on ${{ matrix.name }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Ubuntu 24.04
+            id: ubuntu-24.04
+            image: ubuntu:24.04
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick
+          - name: Ubuntu 22.04
+            id: ubuntu-22.04
+            image: ubuntu:22.04
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick
+          - name: Debian 12
+            id: debian-12
+            image: debian:12
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick
+          - name: Fedora 42
+            id: fedora-42
+            image: fedora:42
+            install: dnf install -y ./rgcopy-*.x86_64.rpm curl procps-ng xorg-x11-server-Xvfb ImageMagick
+          - name: openSUSE Tumbleweed
+            id: opensuse-tumbleweed
+            image: registry.opensuse.org/opensuse/tumbleweed:latest
+            install: zypper --non-interactive install --allow-unsigned-rpm ./rgcopy-*.x86_64.rpm curl procps xorg-x11-server-Xvfb ImageMagick
+          - name: Arch Linux
+            id: archlinux
+            image: archlinux:latest
+            install: pacman -Syu --noconfirm && pacman -U --noconfirm ./rgcopy-*-x86_64.pkg.tar.zst && pacman -S --noconfirm --needed curl procps-ng xorg-server-xvfb imagemagick
+          - name: the portable tarball
+            id: portable
+            image: debian:12
+            portable: 1
+            # The .deb only brings in the libraries: the tarball's own copy is what runs
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick && dpkg -r rgcopy && tar -xzf rgcopy-*-linux-x86_64.tar.gz -C "$HOME" && "$HOME"/rgcopy-*-linux-x86_64/install.sh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: pkg
+      - name: Install and try it
+        env:
+          IMAGE: ${{ matrix.image }}
+          INSTALL: ${{ matrix.install }}
+          PORTABLE: ${{ matrix.portable || 0 }}
+        run: |
+          docker run --rm -v "$PWD/pkg:/pkg" -v "$PWD/packaging/linux/smoke-test.sh:/smoke-test.sh:ro" -w /pkg \
+            -e PORTABLE -e SCREENSHOT=/pkg/window.png "$IMAGE" sh -c "$INSTALL && sh /smoke-test.sh"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: window-${{ matrix.id }}
+          path: pkg/window.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  plan:
+    name: Check the version
+    if: github.event_name != 'pull_request'
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: rgcopy/__init__.py
+          sparse-checkout-cone-mode: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          publish=true
+          if [ "$GITHUB_REF_TYPE" != tag ] && gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION is already released: bump __version__ in rgcopy/__init__.py for a new release"
+            publish=false
+          elif [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = branch ]; then
+            # Only the push that changes the version publishes it; if that run failed, re-run it or
+            # start the workflow by hand
+            previous=$(git fetch -q --depth=1 origin "$BEFORE" 2>/dev/null \
+              && git show "$BEFORE:rgcopy/__init__.py" 2>/dev/null | sed -n 's/^__version__ = "\(.*\)"$/\1/p' || true)
+            if [ "$previous" = "$VERSION" ]; then
+              echo "This push keeps version $VERSION: the packages stay in this run's artifacts"
+              publish=false
+            fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  docker:
+    name: Publish the Docker image
+    needs: [build, plan]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # Image names must be lower case; the repository is "RGCopy"
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      # :latest moves only once the release is out (release job)
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Without attestations the registry lists only the two real platforms
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.licenses=GPL-3.0-only
+            org.opencontainers.image.description=File copy queue powered by rsync, with a web UI
+          cache-from: type=gha,scope=docker-release
+          cache-to: type=gha,scope=docker-release,mode=max
+      - name: Try the image on both platforms
+        run: |
+          for platform in linux/amd64 linux/arm64; do
+            docker run --rm --platform "$platform" "$IMAGE:$VERSION" rgcopy --version
+            docker run --rm --platform "$platform" --entrypoint rsync "$IMAGE:$VERSION" --version
+          done
+
+  release:
+    name: Publish the release
+    needs: [build, plan, docker]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/release-notes.md
+          sparse-checkout-cone-mode: false
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/linux
+      - name: Publish the packages
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # A tag pushed for a release drafted on GitHub: attach the packages to it
+            if [ "$GITHUB_REF_TYPE" = tag ]; then
+              gh release upload "$tag" dist/linux/* --clobber
+            fi
+          else
+            sed -e "s/@VERSION@/$VERSION/g" -e "s|@IMAGE@|$IMAGE|g" .github/release-notes.md > notes.md
+            gh release create "$tag" dist/linux/* --target "$GITHUB_SHA" \
+              --title "RGCopy $VERSION" --notes-file notes.md --generate-notes
+          fi
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Point :latest at this release
+        run: |
+          # An older version released later (a tag on an old commit) leaves :latest alone
+          if [ "$(gh release view --json tagName -q .tagName)" = "v$VERSION" ]; then
+            docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:$VERSION"
+          fi

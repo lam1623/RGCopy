@@ -1,0 +1,25 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: RGCopy
+Upstream-Contact: Lino Alfonso <lleisdier.alfonso@gmail.com>
+Source: https://github.com/lam1623/RGCopy
+
+Files: *
+Copyright: 2026 Lino Alfonso <lleisdier.alfonso@gmail.com>
+License: GPL-3.0-only
+ This program is free software: you can redistribute it and/or modify it under
+ the terms of the GNU General Public License version 3 as published by the Free
+ Software Foundation.
+ .
+ RGCopy 2 is a rewrite of RGCopy (2014-2017) by Reinier Reisy Quevedo Batista,
+ with contributions by Andy Torres; that original code is not part of this
+ package.
+ .
+ On Debian systems, the complete text of the GNU General Public License version 3
+ can be found in "/usr/share/common-licenses/GPL-3".
+
+Files: opt/rgcopy/_internal/*
+Copyright: Their respective authors
+License: various
+ /opt/rgcopy bundles Python (PSF-2.0), Qt 6 (LGPL-3.0), PyQt6 (GPL-3.0) and the
+ Python libraries RGCopy uses, each under its own license: see the *.dist-info
+ folders in /opt/rgcopy/_internal.
