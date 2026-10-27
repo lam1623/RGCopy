@@ -14,7 +14,7 @@ RUN npm run build
 FROM --platform=$BUILDPLATFORM python:3.12-slim AS wheel
 WORKDIR /src
 RUN pip install --no-cache-dir build
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY rgcopy ./rgcopy
 COPY --from=ui /src/rgcopy/web/dist ./rgcopy/web/dist
 RUN python -m build --wheel --outdir /wheels

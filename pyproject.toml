@@ -9,6 +9,8 @@ dynamic = ["version"]
 description = "File copy queue for Linux powered by rsync, with a web UI that runs as a desktop app or in Docker"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [
   { name = "Reinier Reisy Quevedo Batista", email = "reisyreinier@gmail.com" },
   { name = "Lino Alfonso", email = "lleisdier.alfonso@gmail.com" },
@@ -44,7 +46,7 @@ packages = ["rgcopy"]
 artifacts = ["rgcopy/web/dist/**"]
 
 [tool.hatch.build.targets.sdist]
-include = ["rgcopy", "tests", "README.md", "pyproject.toml"]
+include = ["rgcopy", "tests", "README.md", "LICENSE", "pyproject.toml"]
 artifacts = ["rgcopy/web/dist/**"]
 
 [tool.pytest.ini_options]

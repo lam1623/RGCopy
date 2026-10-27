@@ -21,7 +21,24 @@ Sus piezas envejecieron (Python 2, Unity, AppIndicator). **RGCopy 2** es una rec
 
 ## Instalación
 
-Necesitas Python 3.11+ y rsync 3.1+. Para compilar la interfaz desde el código fuente también necesitas Node.js 20+.
+### Paquetes para Linux
+
+Descarga el paquete de tu distribución desde la [página de releases](https://github.com/lam1623/RGCopy/releases). Los paquetes traen su propio Python y Qt; tu gestor de paquetes instala rsync y las bibliotecas de escritorio habituales.
+
+| Distribución | Paquete | Se instala con |
+| --- | --- | --- |
+| Ubuntu 22.04+, Debian 12+, Linux Mint 21+, Pop!_OS 22.04+ | `rgcopy_2.0.0-1_amd64.deb` | `sudo apt install ./rgcopy_2.0.0-1_amd64.deb` |
+| Fedora, openSUSE Tumbleweed | `rgcopy-2.0.0-1.x86_64.rpm` | `sudo dnf install ./rgcopy-2.0.0-1.x86_64.rpm` o `sudo zypper install --allow-unsigned-rpm ./rgcopy-2.0.0-1.x86_64.rpm` |
+| Arch, Manjaro, EndeavourOS | `rgcopy-2.0.0-1-x86_64.pkg.tar.zst` | `sudo pacman -U ./rgcopy-2.0.0-1-x86_64.pkg.tar.zst` |
+| Cualquier otra con glibc 2.35+ | `rgcopy-2.0.0-linux-x86_64.tar.gz` | descomprímelo y ejecuta `./rgcopy`, o `./install.sh` para añadirlo al menú |
+
+Después ejecuta **una vez, con tu usuario**, `rgcopy integrate`: así Ctrl+V en Nautilus, Nemo y Caja pega con RGCopy (ver abajo). Dolphin ya tiene «Pegar con RGCopy» en su menú desde la instalación.
+
+Antes de publicar una versión, cada paquete se instala y se prueba en contenedores limpios de esas distribuciones (ver [Versiones](#versiones)). Para construirlos tú mismo: `make packages` (necesita Docker) los deja en `dist/linux/`.
+
+### Desde el código fuente
+
+Necesitas Python 3.11+ y rsync 3.1+. Para compilar la interfaz también necesitas Node.js 20+.
 
 ```bash
 git clone https://github.com/lam1623/RGCopy.git && cd RGCopy
@@ -76,6 +93,19 @@ rgcopy serve --host 0.0.0.0 --root /srv        # interfaz web para un servidor o
 
 ## Docker o servidor
 
+La imagen publicada funciona en amd64 y arm64 (Raspberry Pi 4/5, la mayoría de los NAS):
+
+```bash
+# Ejecútalo como el dueño de las carpetas, para que los archivos copiados sean tuyos
+docker run -d --name rgcopy --restart unless-stopped -p 8000:8000 \
+  --user "$(id -u):$(id -g)" -e RGCOPY_TOKEN=cambia-esto \
+  -v /srv/disco-a:/media/a -v /srv/disco-b:/media/b -v rgcopy-config:/config \
+  ghcr.io/lam1623/rgcopy:latest
+# abre http://localhost:8000/auth?token=cambia-esto
+```
+
+O constrúyela desde el código con Compose:
+
 ```bash
 cp .env.example .env     # RGCOPY_TOKEN y las carpetas DISK_A / DISK_B
 docker compose up -d
@@ -107,7 +137,20 @@ make dev-api # + make dev-ui: interfaz con recarga en caliente
 - Interfaz: React + Tailwind en `frontend/`, compilada dentro del paquete.
 - Integración con el escritorio: `rgcopy/integration.py` y la extensión `rgcopy/assets/nautilus_rgcopy.py`.
 
-## Créditos
+## Versiones
+
+Publicar una versión es subir el número: cambia `__version__` en `rgcopy/__init__.py` y añade su entrada `<release>` a `packaging/linux/io.github.lam1623.rgcopy.metainfo.xml` (un test comprueba ambas cosas). Cuando el commit que cambia la versión llega a `standalone`, el workflow [Packages and releases](.github/workflows/packages.yml):
+
+1. construye los paquetes .deb, .rpm, Arch y el portable;
+2. instala y prueba cada uno en contenedores limpios de Ubuntu 24.04, Ubuntu 22.04, Debian 12, Fedora 42, openSUSE Tumbleweed y Arch: copia y mueve archivos con el rsync del sistema, la integración, el servidor web y la ventana;
+3. publica `ghcr.io/lam1623/rgcopy:<versión>` para amd64 y arm64 y la prueba en ambas;
+4. publica la release `v<versión>` con todos los paquetes, sus checksums y las instrucciones, y mueve la etiqueta `:latest` de la imagen a esa versión.
+
+Los demás pushes también construyen y prueban los paquetes, y los dejan en los artefactos del workflow. Si una publicación falla, vuelve a ejecutarla, o lánzala a mano desde la pestaña Actions: publica la versión actual si aún no tiene release. Un tag `v*` también publica.
+
+## Créditos y licencia
 
 - RGCopy original (2014–2017): Reinier Reisy Quevedo Batista, con contribuciones de Andy Torres.
 - RGCopy 2: Lino Alfonso.
+
+RGCopy 2 es software libre bajo la [GNU General Public License v3](LICENSE). Los paquetes de Linux incluyen Python, Qt 6 y PyQt6, cada uno con su propia licencia. El código original de [`legacy/`](legacy/) no forma parte de los paquetes y conserva los términos de sus autores.

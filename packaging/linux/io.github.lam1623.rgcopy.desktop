@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=RGCopy
+GenericName=File Copy Queue
+GenericName[es]=Cola de copias de archivos
+Comment=Copy and move files with rsync: pause, skip, resume and see the time left
+Comment[es]=Copia y mueve archivos con rsync: pausa, salta, reanuda y mira el tiempo restante
+Exec=rgcopy
+Icon=io.github.lam1623.rgcopy
+Terminal=false
+Categories=Utility;FileTools;
+Keywords=copy;move;rsync;paste;transfer;teracopy;
+Keywords[es]=copiar;mover;rsync;pegar;transferir;teracopy;
+StartupNotify=true
+StartupWMClass=rgcopy
