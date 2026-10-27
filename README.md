@@ -9,7 +9,7 @@
   <em>A file copy queue for Linux powered by rsync, in Spanish and English.</em>
 </p>
 
-![RGCopy copiando](docs/screenshots/copying-light.png)
+![RGCopy copiando](docs/screenshots/copying.png)
 
 RGCopy toma el Ctrl+V de tu gestor de archivos, como TeraCopy en Windows: copias o cortas en Nautilus, Nemo o Caja, pegas, y la copia la hace RGCopy con rsync. Puedes pausarla y reanudarla, ver la velocidad y el tiempo restante, saltar un archivo, y volver a lanzar una copia interrumpida para que termine solo lo que falta. Cada nuevo Ctrl+V se suma a la misma ventana.
 
@@ -49,10 +49,17 @@ Para leer el portapapeles, RGCopy usa `wl-paste` (Wayland, paquete `wl-clipboard
 
 ## Uso
 
-- **Ctrl+C / Ctrl+X y luego Ctrl+V** en el gestor de archivos: se abre RGCopy, o la ventana ya abierta recibe la copia nueva en su lista.
-- **Nueva transferencia** dentro de la app: eliges archivos y carpetas, el destino, copiar o mover, y qué hacer con los archivos que ya existen (reemplazar, conservar, solo si es más nuevo, o guardar una copia del anterior).
-- **Más**: la lista de archivos con su estado (copiado, copiándose, pendiente, ya al día) y la salida de rsync.
+- **Ctrl+C / Ctrl+X y luego Ctrl+V** en el gestor de archivos: se abre RGCopy, o la ventana ya abierta añade la copia nueva al final de su lista. Las copias de la lista se hacen una tras otra.
+- **Barras**: una para el archivo actual y otra para toda la lista, con un tramo por copia. Hay además una gráfica de velocidad, el tiempo restante y la velocidad media.
+- **Pausar, Saltar archivo y Cancelar**: saltar relanza rsync sin ese archivo y lo ya copiado no se repite. **Volver a ejecutar** completa solo lo que falta.
+- **Archivos que ya existen**: antes de copiar nada, RGCopy te los muestra una vez, con tamaño y fecha de cada lado. Eliges reemplazar, conservar, reemplazar solo los más antiguos, o reemplazar guardando una copia del anterior. También puedes dejarlo fijo en Ajustes.
+- **Más**: la lista de archivos de cada copia con su estado (copiado, copiándose, pendiente, saltado, ya al día), y el comando y la salida de rsync.
+- **Al terminar**: no hacer nada, cerrar la ventana, verificar las copias por contenido (`rsync --checksum --dry-run`) o apagar el equipo, con una cuenta atrás de 60 s que puedes cancelar.
 - Mover dentro del mismo disco es instantáneo (un `rename`). Entre discos, rsync copia y luego borra el origen.
+
+| Archivos que ya existen | Al terminar |
+| --- | --- |
+| ![Conflicto](docs/screenshots/conflict.png) | ![Terminado](docs/screenshots/done.png) |
 
 ### Línea de comandos
 

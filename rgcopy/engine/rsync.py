@@ -17,7 +17,10 @@ from pydantic import BaseModel, Field
 MIN_VERSION = (3, 1, 0)
 
 Mode = Literal["copy", "move"]
-Conflict = Literal["overwrite", "skip", "update", "backup"]
+# "ask": RGCopy looks for existing files before starting and asks which rule to use
+Conflict = Literal["ask", "overwrite", "skip", "update", "backup"]
+# The rules rsync itself applies
+Resolution = Literal["overwrite", "skip", "update", "backup"]
 
 # Suffix rsync gives to the previous version of a replaced file with conflict="backup"
 BACKUP_SUFFIX = ".rgcopy~"
@@ -80,33 +83,55 @@ class TransferOptions(BaseModel):
     bwlimit: int = Field(0, ge=0, le=10_000_000)
 
 
-def build_command(rsync: str, sources: list[Path], destination: Path, options: TransferOptions) -> list[str]:
-    """rsync argv that puts every source *inside* ``destination``, like pasting in a file manager."""
+def exclude_pattern(name: str) -> str:
+    """An rsync rule matching exactly ``name`` (relative to the transfer root, as rsync prints it)."""
 
-    argv = [rsync]
+    escaped = "".join("\\" + char if char in "*?[\\" else char for char in name)
+    return "/" + escaped
+
+
+def build_command(
+    rsync: str,
+    sources: list[Path],
+    destination: Path,
+    options: TransferOptions,
+    *,
+    excludes: list[str] | None = None,
+    verify: bool = False,
+) -> list[str]:
+    """rsync argv that puts every source *inside* ``destination``, like pasting in a file manager.
+
+    ``excludes`` are files the user skipped. ``verify`` changes nothing: it lists, by content,
+    the files that differ from the destination, under the same conflict rule as the copy.
+    """
+
     # -a: recursive, links, permissions, times, group, owner, devices; -rlt is the portable subset
-    argv.append("-a" if options.preserve else "-rlt")
-    argv += [
+    argv = [rsync, "-a" if options.preserve else "-rlt"]
+    if verify:
+        argv += ["--checksum", "--dry-run", "--itemize-changes"]
+    else:
         # One overall progress line plus the name of each transferred file
-        "--info=progress2,name1",
+        argv.append("--info=progress2,name1")
+    argv += [
         # Know the whole file list up front, so the overall percentage does not jump back
         "--no-inc-recursive",
         # Print file names as they are (UTF-8), not as \#ooo escapes
         "--8-bit-output",
         "--outbuf=L",
     ]
-    if options.checksum:
+    if options.checksum and not verify:
         argv.append("--checksum")
-    if options.bwlimit:
+    if options.bwlimit and not verify:
         argv.append(f"--bwlimit={options.bwlimit}")
     if options.conflict == "skip":
         argv.append("--ignore-existing")
     elif options.conflict == "update":
         argv.append("--update")
-    elif options.conflict == "backup":
+    elif options.conflict == "backup" and not verify:
         argv += ["--backup", f"--suffix={BACKUP_SUFFIX}"]
-    if options.mode == "move":
+    if options.mode == "move" and not verify:
         argv.append("--remove-source-files")
+    argv += [f"--exclude={exclude_pattern(name)}" for name in excludes or []]
     # "--" ends the options: a file named "-n" must not turn into a dry run
     argv.append("--")
     argv += [str(s) for s in sources]
@@ -129,8 +154,10 @@ class Progress(BaseModel):
     speed: float | None = None
     eta_s: float | None = None
     elapsed_s: float = 0.0
-    # The file being transferred, relative to the destination
+    # The file being transferred, relative to the destination, and how far it is
     current: str | None = None
+    current_bytes: int = 0
+    current_size: int | None = None
 
 
 _UNITS = {"": 1, "B": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}

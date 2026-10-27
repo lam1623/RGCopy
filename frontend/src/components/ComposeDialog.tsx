@@ -24,7 +24,7 @@ export function ComposeDialog() {
   const settings = useStore((s) => s.settings);
   const home = useStore((s) => s.system?.home);
 
-  const [conflict, setConflict] = useState<Conflict>("overwrite");
+  const [conflict, setConflict] = useState<Conflict>("ask");
   const [checksum, setChecksum] = useState(false);
   const [preserve, setPreserve] = useState(true);
   const [bwlimit, setBwlimit] = useState(0);
@@ -66,6 +66,7 @@ export function ComposeDialog() {
   };
 
   const conflicts: { value: Conflict; label: string; hint: string }[] = [
+    { value: "ask", label: t("conflict.ask"), hint: t("conflict.ask.hint") },
     { value: "overwrite", label: t("conflict.overwrite"), hint: t("conflict.overwrite.hint") },
     { value: "skip", label: t("conflict.skip"), hint: t("conflict.skip.hint") },
     { value: "update", label: t("conflict.update"), hint: t("conflict.update.hint") },

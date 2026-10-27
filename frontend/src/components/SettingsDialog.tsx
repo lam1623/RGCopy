@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { saveSettings } from "@/lib/actions";
 import { useT } from "@/lib/i18n";
 import { useStore } from "@/lib/store";
-import type { Conflict, Settings } from "@/lib/types";
+import type { Conflict, Settings, WhenDone } from "@/lib/types";
 import { Input, Segmented, Select, Switch } from "./ui/controls";
 import { Row, SectionTitle } from "./ui/misc";
 import { Modal } from "./ui/overlay";
@@ -36,6 +36,7 @@ export function SettingsDialog() {
   if (!settings) return null;
 
   const conflicts: { value: Conflict; label: string }[] = [
+    { value: "ask", label: t("conflict.ask") },
     { value: "overwrite", label: t("conflict.overwrite") },
     { value: "skip", label: t("conflict.skip") },
     { value: "update", label: t("conflict.update") },
@@ -149,7 +150,23 @@ export function SettingsDialog() {
             }
           />
           {system?.desktop && (
-            <Toggle field="close_when_done" title={t("settings.closeWhenDone")} description={t("settings.closeWhenDone.hint")} />
+            <Row
+              title={t("whenDone.label")}
+              description={t("settings.whenDone.hint")}
+              control={
+                <Select<WhenDone>
+                  className="w-44"
+                  value={settings.when_done}
+                  onValueChange={(when_done) => saveSettings({ when_done })}
+                  options={[
+                    { value: "nothing", label: t("whenDone.nothing") },
+                    { value: "close", label: t("whenDone.close") },
+                    { value: "verify", label: t("whenDone.verify") },
+                    { value: "shutdown", label: t("whenDone.shutdown") },
+                  ]}
+                />
+              }
+            />
           )}
         </Section>
 

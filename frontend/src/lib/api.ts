@@ -1,4 +1,4 @@
-import type { ClipboardFiles, FileStates, FsEntry, FsListing, Job, QueueState, Root, Settings, SystemInfo, TransferOptions } from "./types";
+import type { ClipboardFiles, FileStates, Resolution, FsEntry, FsListing, Job, QueueState, Root, Settings, SystemInfo, TransferOptions } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -67,11 +67,15 @@ export const api = {
   addJob: (sources: string[], destination: string, options: Partial<TransferOptions>) =>
     request<Job>("POST", "/api/jobs", { sources, destination, options }),
   removeJobs: (ids: string[]) => request<{ removed: string[] }>("POST", "/api/jobs/remove", { ids }),
-  jobAction: (id: string, action: "pause" | "resume" | "cancel" | "retry") =>
+  jobAction: (id: string, action: "pause" | "resume" | "cancel" | "retry" | "skip" | "verify") =>
     request<Job>("POST", `/api/jobs/${id}/${action}`),
   jobFiles: (id: string, offset = 0, limit = 500) =>
     request<FileStates>("GET", `/api/jobs/${id}/files?offset=${offset}&limit=${limit}`),
   jobLog: (id: string) => request<{ log: string[]; error: string | null; command: string }>("GET", `/api/jobs/${id}/log`),
+
+  resolve: (id: string, rule: Resolution, remember: boolean) =>
+    request<Job>("POST", `/api/jobs/${id}/resolve`, { rule, remember }),
+  poweroff: () => request<{ status: string }>("POST", "/api/system/poweroff"),
 
   startQueue: () => request<QueueState>("POST", "/api/queue/start"),
   pauseQueue: () => request<QueueState>("POST", "/api/queue/pause"),

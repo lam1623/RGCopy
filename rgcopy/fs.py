@@ -102,6 +102,52 @@ def scan(paths: list[Path]) -> ScanResult:
     return result
 
 
+class Conflict(BaseModel):
+    """A file of the transfer that already exists at the destination."""
+
+    path: str
+    existing_size: int
+    existing_mtime: float
+    incoming_size: int
+    incoming_mtime: float
+
+
+def find_conflicts(
+    sources: list[Path], destination: Path, files: list[tuple[str, int]], limit: int = 200
+) -> tuple[int, list[Conflict]]:
+    """How many listed files already exist at the destination, and the first ``limit`` of them."""
+
+    parents = {source.name: source.parent for source in sources}
+    count = 0
+    found: list[Conflict] = []
+    for name, size in files:
+        target = destination / name
+        try:
+            existing = target.lstat()
+        except OSError:
+            continue
+        if not os.path.isfile(target):
+            continue
+        count += 1
+        if len(found) >= limit:
+            continue
+        parent = parents.get(name.split("/", 1)[0])
+        try:
+            incoming = (parent / name).lstat() if parent is not None else None
+        except OSError:
+            incoming = None
+        found.append(
+            Conflict(
+                path=name,
+                existing_size=existing.st_size,
+                existing_mtime=existing.st_mtime,
+                incoming_size=size,
+                incoming_mtime=incoming.st_mtime if incoming else 0.0,
+            )
+        )
+    return count, found
+
+
 def free_space(path: Path) -> int | None:
     try:
         return shutil.disk_usage(path).free

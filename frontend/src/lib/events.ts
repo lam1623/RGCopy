@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { closeWindow, verifyAll } from "./actions";
 import { api } from "./api";
 import { resolveLang, translate } from "./i18n";
 import { nativeApi } from "./native";
@@ -20,14 +21,17 @@ function notify(title: string, body: string) {
   }
 }
 
-function maybeClose() {
-  const { settings, jobs } = useStore.getState();
-  const native = nativeApi();
+/** "When done": only once everything finished without errors. */
+function whenDone() {
+  const { settings, jobs, system } = useStore.getState();
   const list = Object.values(jobs);
-  if (!native || !settings?.close_when_done || !list.length) return;
-  if (list.every((job) => job.status === "completed")) {
+  if (!settings || !list.length || !list.every((job) => job.status === "completed")) return;
+  if (settings.when_done === "verify") void verifyAll();
+  else if (settings.when_done === "close" && nativeApi()) {
     // Leave a moment to see the result
-    setTimeout(() => void native.close().catch(() => undefined), 1500);
+    setTimeout(() => void closeWindow(), 1500);
+  } else if (settings.when_done === "shutdown" && system?.desktop) {
+    useStore.getState().setShutdownIn(60);
   }
 }
 
@@ -60,7 +64,7 @@ function handle(event: ServerEvent) {
       if (failed) toast.warning(tr("toast.queueDone"), { description: body });
       else toast.success(tr("toast.queueDone"), { description: body });
       notify(tr("toast.queueDone"), body);
-      maybeClose();
+      whenDone();
       break;
     }
     case "settings":

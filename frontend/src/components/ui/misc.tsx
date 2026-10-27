@@ -82,6 +82,7 @@ export function Row({
 
 const STATUS_STYLES: Record<JobStatus, string> = {
   scanning: "bg-info/12 text-info",
+  conflict: "bg-warning/12 text-warning",
   queued: "bg-elevated text-muted",
   running: "bg-accent-soft text-accent",
   paused: "bg-warning/12 text-warning",
@@ -118,6 +119,7 @@ export function StatusBadge({
 
 const BAR_COLORS: Record<JobStatus, string> = {
   scanning: "bg-border-strong",
+  conflict: "bg-warning",
   queued: "bg-border-strong",
   running: "bg-brand",
   paused: "bg-warning",

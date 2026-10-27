@@ -4,6 +4,7 @@ from rgcopy.engine.rsync import (
     BACKUP_SUFFIX,
     TransferOptions,
     build_command,
+    exclude_pattern,
     is_file_name,
     parse_progress_line,
 )
@@ -69,3 +70,20 @@ def test_command_options():
         "rsync", [Path("/a")], Path("/b"), TransferOptions(conflict="skip")
     )
     assert "--update" in build_command("rsync", [Path("/a")], Path("/b"), TransferOptions(conflict="update"))
+
+
+def test_exclude_patterns_are_literal_and_anchored():
+    assert exclude_pattern("album/a[1]*?.jpg") == "/album/a\\[1]\\*\\?.jpg"
+    assert exclude_pattern("back\\slash") == "/back\\\\slash"
+
+
+def test_verify_command_changes_nothing_and_keeps_the_rule():
+    options = TransferOptions(mode="move", conflict="update", bwlimit=100, checksum=False)
+    argv = build_command("rsync", [Path("/a/x")], Path("/b"), options, excludes=["x/skip.me"], verify=True)
+    assert "--dry-run" in argv and "--checksum" in argv and "--itemize-changes" in argv
+    assert "--remove-source-files" not in argv
+    assert "--bwlimit=100" not in argv
+    assert not any(a.startswith("--info=") for a in argv)
+    # Files kept by the rule are not reported as different
+    assert "--update" in argv
+    assert "--exclude=/x/skip.me" in argv

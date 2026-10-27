@@ -3,7 +3,7 @@ import { ApiError, api } from "./api";
 import { hasKey, resolveLang, type TranslationKey, translate } from "./i18n";
 import { nativeApi } from "./native";
 import { type BrowserMode, useStore } from "./store";
-import type { Job, JobStatus, Mode, Settings, TransferOptions } from "./types";
+import type { Job, JobStatus, Mode, Resolution, Settings, TransferOptions } from "./types";
 
 function tr(key: TranslationKey, vars?: Record<string, string | number>): string {
   return translate(resolveLang(useStore.getState().settings?.language), key, vars);
@@ -83,12 +83,40 @@ export async function pasteFromClipboard(destination?: string) {
   }
 }
 
-export async function jobAction(job: Job, action: "pause" | "resume" | "cancel" | "retry") {
+export async function jobAction(job: Job, action: "pause" | "resume" | "cancel" | "retry" | "skip" | "verify") {
   try {
     useStore.getState().upsertJob(await api.jobAction(job.id, action));
   } catch (error) {
     reportError(error);
   }
+}
+
+export async function resolveConflict(job: Job, rule: Resolution, remember: boolean) {
+  try {
+    useStore.getState().upsertJob(await api.resolve(job.id, rule, remember));
+  } catch (error) {
+    reportError(error);
+  }
+}
+
+/** Verify every finished copy that has not been verified yet. */
+export async function verifyAll() {
+  const jobs = Object.values(useStore.getState().jobs).filter(
+    (job) => job.status === "completed" && job.options.mode === "copy" && job.verify !== "running",
+  );
+  await Promise.all(jobs.map((job) => jobAction(job, "verify")));
+}
+
+export async function poweroff() {
+  try {
+    await api.poweroff();
+  } catch (error) {
+    reportError(error);
+  }
+}
+
+export async function closeWindow() {
+  await nativeApi()?.close().catch(() => undefined);
 }
 
 export async function removeJobs(ids: string[]) {

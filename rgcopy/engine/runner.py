@@ -34,13 +34,28 @@ class RsyncRun:
         total_files: int,
         on_progress: Callable[[Progress], None] | None = None,
         log_lines: int = 300,
+        *,
+        base_bytes: int = 0,
+        base_files: int = 0,
+        sizes: dict[str, int] | None = None,
     ) -> None:
+        """``base_bytes``/``base_files``: what earlier runs of the same transfer already did
+        (rsync is restarted to skip a file and only counts what it transfers itself).
+        ``sizes``: file sizes by rsync name, to follow the progress of the file in flight."""
+
         self.argv = argv
         self.total_bytes = total_bytes
         self.total_files = total_files
         self.on_progress = on_progress
+        self.base_bytes = base_bytes
+        self.base_files = base_files
+        self.sizes = sizes or {}
+        # Bytes of the files this run already finished (rsync counts the one in flight on top)
+        self._finished_bytes = 0
         self.log: collections.deque[str] = collections.deque(maxlen=log_lines)
-        self.progress = Progress(total_bytes=total_bytes, total_files=total_files)
+        self.progress = Progress(
+            total_bytes=total_bytes, total_files=total_files, bytes_done=base_bytes, files_done=base_files
+        )
         self._proc: asyncio.subprocess.Process | None = None
         self._cancel_requested = False
         self._paused_at: float | None = None
@@ -91,17 +106,28 @@ class RsyncRun:
         progress = self.progress
         if parsed is None:
             if is_file_name(line):
+                if self.names:
+                    self._finished_bytes += self.sizes.get(self.names[-1], 0)
                 self.names.append(line.strip())
                 progress.current = line.strip()
-                progress.files_done = min(self.total_files, max(progress.files_done, len(self.names) - 1))
+                progress.current_size = self.sizes.get(progress.current)
+                progress.current_bytes = 0
+                done = self.base_files + len(self.names) - 1
+                progress.files_done = min(self.total_files, max(progress.files_done, done))
                 self._emit()
             return
-        progress.bytes_done = max(progress.bytes_done, parsed.bytes_done)
+        progress.bytes_done = max(progress.bytes_done, self.base_bytes + parsed.bytes_done)
+        if progress.current_size is not None:
+            in_flight = parsed.bytes_done - self._finished_bytes
+            progress.current_bytes = max(0, min(progress.current_size, in_flight))
         if parsed.transferred is not None:
-            progress.files_done = min(self.total_files, max(progress.files_done, parsed.transferred))
+            done = self.base_files + parsed.transferred
+            progress.files_done = min(self.total_files, max(progress.files_done, done))
         own = progress.bytes_done / self.total_bytes * 100 if self.total_bytes else 0.0
-        # rsync's figure also counts files it skipped; ours is exact for plain copies
-        progress.percent = round(min(99.9, max(own, float(parsed.percent))), 2)
+        # rsync's figure also counts files it found up to date; ours is exact for plain copies.
+        # After a restart rsync's own figure starts over, so only ours counts.
+        rsync_pct = float(parsed.percent) if not self.base_bytes else 0.0
+        progress.percent = round(min(99.9, max(own, rsync_pct, progress.percent)), 2)
         if parsed.speed > 0:
             self._speed = (
                 parsed.speed

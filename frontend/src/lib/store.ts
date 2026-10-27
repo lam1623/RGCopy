@@ -20,7 +20,7 @@ export interface Draft {
 // Speed samples kept per transfer for the chart (about a minute: progress comes every 0.25-0.5 s)
 export const SPEED_SAMPLES = 160;
 
-const EMPTY_COUNTS = { scanning: 0, queued: 0, running: 0, paused: 0, completed: 0, failed: 0, canceled: 0 };
+const EMPTY_COUNTS = { scanning: 0, conflict: 0, queued: 0, running: 0, paused: 0, completed: 0, failed: 0, canceled: 0 };
 
 interface State {
   booted: boolean;
@@ -36,6 +36,10 @@ interface State {
   /** The "new transfer" dialog, null when closed */
   draft: Draft | null;
   settingsOpen: boolean;
+  /** Transfers whose "files already exist" question the user put off */
+  conflictLater: string[];
+  /** Seconds left before "shut down when done" (null: no countdown) */
+  shutdownIn: number | null;
   /** The transfer shown in the big panel (null: the one that is copying) */
   focused: string | null;
   /** Bytes per second of each transfer, oldest first */
@@ -48,6 +52,8 @@ interface State {
   setDraft: (draft: Draft | null) => void;
   patchDraft: (patch: Partial<Draft>) => void;
   setSettingsOpen: (open: boolean) => void;
+  setShutdownIn: (seconds: number | null) => void;
+  decideLater: (id: string, later: boolean) => void;
   focus: (id: string | null) => void;
 
   applySnapshot: (jobs: Job[], queue: QueueState) => void;
@@ -57,7 +63,7 @@ interface State {
   setQueue: (queue: QueueState) => void;
 }
 
-export const ACTIVE_STATUSES = new Set(["scanning", "queued", "running", "paused"]);
+export const ACTIVE_STATUSES = new Set(["scanning", "conflict", "queued", "running", "paused"]);
 
 /** What the big panel shows: the chosen transfer, else the one copying, else the next or the last. */
 export function heroId(state: Pick<State, "focused" | "jobs" | "order">): string | null {
@@ -66,6 +72,7 @@ export function heroId(state: Pick<State, "focused" | "jobs" | "order">): string
   const pick =
     list.find((job) => job.status === "running") ??
     list.find((job) => job.status === "paused") ??
+    list.find((job) => job.status === "conflict") ??
     list.find((job) => job.status === "scanning" || job.status === "queued") ??
     list[list.length - 1];
   return pick?.id ?? null;
@@ -84,6 +91,8 @@ export const useStore = create<State>()((set) => ({
   browser: null,
   draft: null,
   settingsOpen: false,
+  shutdownIn: null,
+  conflictLater: [],
   focused: null,
   speeds: {},
 
@@ -94,6 +103,11 @@ export const useStore = create<State>()((set) => ({
   setDraft: (draft) => set({ draft }),
   patchDraft: (patch) => set((state) => (state.draft ? { draft: { ...state.draft, ...patch } } : state)),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setShutdownIn: (shutdownIn) => set({ shutdownIn }),
+  decideLater: (id, later) =>
+    set((state) => ({
+      conflictLater: later ? [...state.conflictLater, id] : state.conflictLater.filter((x) => x !== id),
+    })),
   focus: (focused) => set({ focused }),
 
   applySnapshot: (list, queue) =>

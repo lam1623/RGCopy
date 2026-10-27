@@ -13,7 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 log = logging.getLogger(__name__)
 
-Conflict = Literal["overwrite", "skip", "update", "backup"]
+# "ask": look for existing files before copying and let the user pick one of the other rules
+Conflict = Literal["ask", "overwrite", "skip", "update", "backup"]
+WhenDone = Literal["nothing", "close", "verify", "shutdown"]
 
 
 class Settings(BaseModel):
@@ -24,7 +26,7 @@ class Settings(BaseModel):
     # Start a transfer as soon as it is added (pasting files expects that)
     auto_start: bool = True
     # What to do with files that already exist at the destination
-    conflict: Conflict = "overwrite"
+    conflict: Conflict = "ask"
     # Compare files by content instead of size and modification time
     checksum: bool = False
     # Keep permissions, owner, group and timestamps (rsync -a)
@@ -34,8 +36,9 @@ class Settings(BaseModel):
     # Refuse to start a copy that does not fit in the free space of the destination
     check_space: bool = True
     notify_on_finish: bool = True
-    # Desktop app: close the window once every transfer finished without errors
-    close_when_done: bool = False
+    # Once every transfer finished without errors: close the window (desktop app), verify the
+    # copies, or shut the computer down (desktop app, after a countdown that can be canceled)
+    when_done: WhenDone = "nothing"
     theme: Literal["system", "dark", "light"] = "light"
     language: Literal["auto", "es", "en"] = "auto"
 
@@ -53,7 +56,7 @@ class SettingsPatch(BaseModel):
     bwlimit: int | None = Field(None, ge=0, le=10_000_000)
     check_space: bool | None = None
     notify_on_finish: bool | None = None
-    close_when_done: bool | None = None
+    when_done: WhenDone | None = None
     theme: Literal["system", "dark", "light"] | None = None
     language: Literal["auto", "es", "en"] | None = None
 

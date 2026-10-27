@@ -123,3 +123,32 @@ def test_events_websocket(client: TestClient):
         first = ws.receive_json()
     assert first["type"] == "snapshot"
     assert first["queue"]["counts"]["queued"] == 0
+
+
+@needs_rsync
+def test_conflict_skip_and_verify_endpoints(client: TestClient, tree: Path):
+    (tree / "dst/single.txt").write_text("old")
+    job = client.post(
+        "/api/jobs",
+        json={"sources": [str(tree / "src/single.txt")], "destination": str(tree / "dst")},
+        headers=AUTH,
+    ).json()
+    deadline = time.monotonic() + 20
+    while job["status"] == "scanning" and time.monotonic() < deadline:
+        time.sleep(0.05)
+        job = client.get(f"/api/jobs/{job['id']}", headers=AUTH).json()
+    # The default is to ask
+    assert job["status"] == "conflict" and job["conflict_count"] == 1
+    assert (
+        client.post(f"/api/jobs/{job['id']}/resolve", json={"rule": "ask"}, headers=AUTH).status_code == 422
+    )
+    resolved = client.post(f"/api/jobs/{job['id']}/resolve", json={"rule": "overwrite"}, headers=AUTH).json()
+    assert resolved["options"]["conflict"] == "overwrite"
+    while job["status"] not in ("completed", "failed") and time.monotonic() < deadline:
+        time.sleep(0.05)
+        job = client.get(f"/api/jobs/{job['id']}", headers=AUTH).json()
+    assert (tree / "dst/single.txt").read_text() == "single"
+    assert client.post(f"/api/jobs/{job['id']}/skip", headers=AUTH).status_code == 409
+    assert client.post(f"/api/jobs/{job['id']}/verify", headers=AUTH).json()["verify"] == "running"
+    # Only the desktop app may shut the computer down
+    assert client.post("/api/system/poweroff", headers=AUTH).status_code == 409

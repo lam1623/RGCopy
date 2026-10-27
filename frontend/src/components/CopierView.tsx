@@ -1,16 +1,17 @@
 import { ClipboardPaste, CopyPlus, Pause, Play, Settings2, Terminal, WifiOff } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { openCompose, pasteFromClipboard, pauseQueue, startQueue } from "@/lib/actions";
-import { formatBytes, formatRelative, formatSpeed } from "@/lib/format";
+import { formatSpeed } from "@/lib/format";
 import { useLang, useT } from "@/lib/i18n";
 import { nativeApi } from "@/lib/native";
-import { heroId, useStore } from "@/lib/store";
+import { ACTIVE_STATUSES, heroId, useStore } from "@/lib/store";
+import type { Job } from "@/lib/types";
 import { cn, isMac } from "@/lib/utils";
 import { Logo } from "./Brand";
-import { CopyPanel } from "./CopyPanel";
-import { QueueList } from "./QueueList";
+import { DonePanel } from "./DonePanel";
+import { TransferWindow } from "./TransferWindow";
 import { Button } from "./ui/button";
-import { Kbd, ProgressBar } from "./ui/misc";
+import { Kbd } from "./ui/misc";
 import { Tip } from "./ui/overlay";
 
 const MOD = isMac ? "⌘" : "Ctrl";
@@ -54,18 +55,12 @@ function useWindowTitle() {
 
 function Footer() {
   const t = useT();
-  const lang = useLang();
-  const queue = useStore((s) => s.queue);
+  const counts = useStore((s) => s.queue.counts);
   const rsync = useStore((s) => s.system?.rsync);
   const connection = useStore((s) => s.connection);
-  const { counts } = queue;
-  const pending = counts.scanning + counts.queued + counts.running + counts.paused;
-  const percent = queue.total_bytes ? (queue.bytes_done / queue.total_bytes) * 100 : 0;
-  const remaining = queue.speed ? Math.max(0, queue.total_bytes - queue.bytes_done) / queue.speed : null;
-  const paused = counts.running === 0 && counts.paused > 0;
 
   return (
-    <footer className="flex items-center gap-4 border-t border-border bg-panel px-4 py-2.5 text-xs text-muted">
+    <footer className="flex items-center gap-4 border-t border-border bg-panel px-4 py-2 text-xs text-muted">
       {connection === "offline" ? (
         <span className="flex items-center gap-1.5 font-medium text-warning">
           <WifiOff className="size-3.5" />
@@ -79,32 +74,21 @@ function Footer() {
           </span>
         </Tip>
       )}
-      {pending > 0 ? (
-        <>
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <span className="shrink-0 font-medium text-fg">{pending === 1 ? t("overall.one") : t("overall.many", { count: pending })}</span>
-            <ProgressBar className="hidden h-1.5 min-w-16 flex-1 sm:block" value={percent} status={paused ? "paused" : "running"} />
-            <span className="shrink-0 tabular">
-              {t("job.ofTotal", { done: formatBytes(queue.bytes_done, lang), total: formatBytes(queue.total_bytes, lang) })}
-              {!paused && remaining != null && ` · ${t("job.eta", { time: formatRelative(remaining) })}`}
-            </span>
-          </div>
-          {counts.running > 0 ? (
-            <Button size="xs" variant="ghost" onClick={() => pauseQueue()}>
-              <Pause />
-              {t("transfers.pauseAll")}
-            </Button>
-          ) : (
-            (counts.paused > 0 || counts.queued > 0) && (
-              <Button size="xs" variant="subtle" onClick={() => startQueue()}>
-                <Play />
-                {counts.paused ? t("transfers.resumeAll") : t("transfers.start")}
-              </Button>
-            )
-          )}
-        </>
+      <span className="ml-auto" />
+      {counts.running > 0 ? (
+        <Button size="xs" variant="ghost" onClick={() => pauseQueue()}>
+          <Pause />
+          {t("transfers.pauseAll")}
+        </Button>
+      ) : counts.conflict > 0 ? (
+        <span className="font-medium text-warning">{t("hero.conflict")}</span>
+      ) : counts.paused > 0 || counts.queued > 0 ? (
+        <Button size="xs" variant="subtle" onClick={() => startQueue()}>
+          <Play />
+          {counts.paused ? t("transfers.resumeAll") : t("transfers.start")}
+        </Button>
       ) : (
-        <span className="flex-1 text-right">{t("transfers.idle")}</span>
+        <span>{t("transfers.idle")}</span>
       )}
     </footer>
   );
@@ -163,7 +147,10 @@ export function CopierView() {
   const t = useT();
   const hero = useStore(heroId);
   const job = useStore((s) => (hero ? s.jobs[hero] : undefined));
-  const any = useStore((s) => s.order.length > 0);
+  const jobs = useStore((s) => s.jobs);
+  const order = useStore((s) => s.order);
+  const list = useMemo(() => order.map((id) => jobs[id]).filter((j): j is Job => !!j), [order, jobs]);
+  const pending = list.some((j) => ACTIVE_STATUSES.has(j.status));
   const canPaste = useStore((s) => !!s.system?.clipboard);
   const setSettingsOpen = useStore((s) => s.setSettingsOpen);
   useShortcuts(canPaste);
@@ -193,11 +180,10 @@ export function CopierView() {
         </Tip>
       </header>
 
-      {any && job ? (
+      {job ? (
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl space-y-5 px-4 py-4 sm:px-5">
-            <CopyPanel key={job.id} job={job} />
-            <QueueList hero={hero} />
+          <div className="mx-auto max-w-3xl px-3 py-3 sm:px-5 sm:py-4">
+            {pending ? <TransferWindow job={job} list={list} /> : <DonePanel list={list} />}
           </div>
         </main>
       ) : (

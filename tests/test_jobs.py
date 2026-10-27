@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -202,7 +203,7 @@ async def test_file_states(manager: JobManager, tree: Path):
     view = manager.file_states(job.id)
     states = {f["path"]: f["state"] for f in view["files"]}
     assert view["total"] == 3 and not view["truncated"]
-    assert states == {"album/deep/ñandú b.txt": "done", "album/one.txt": "skipped", "album/two.bin": "done"}
+    assert states == {"album/deep/ñandú b.txt": "done", "album/one.txt": "uptodate", "album/two.bin": "done"}
     assert manager.file_states(job.id, offset=1, limit=1)["files"][0]["path"] == "album/two.bin"
 
 
@@ -217,3 +218,114 @@ async def test_new_transfer_does_not_resume_a_paused_one(manager: JobManager, tr
     await wait_for(manager, quick)
     assert slow.status == JobStatus.PAUSED
     await manager.cancel_job(slow.id)
+
+
+async def test_existing_files_wait_for_a_decision(manager: JobManager, tree: Path):
+    manager.settings.update({"conflict": "ask"})
+    make_tree(tree / "dst/album", {"one.txt": "kept"})
+    job = await manager.add_transfer([str(tree / "src/album")], str(tree / "dst"))
+    await wait_for(manager, job, lambda j: j.status == JobStatus.CONFLICT)
+    assert job.conflict_count == 1
+    assert job.conflicts[0].path == "album/one.txt"
+    assert job.conflicts[0].existing_size == 4 and job.conflicts[0].incoming_size == 3
+    assert manager.busy()
+    with pytest.raises(ManagerError):
+        manager.verify_job(job.id)
+    manager.resolve_conflict(job.id, "skip", remember=True)
+    assert job.conflicts == []
+    await wait_for(manager, job)
+    assert job.status == JobStatus.COMPLETED
+    assert (tree / "dst/album/one.txt").read_text() == "kept"
+    assert (tree / "dst/album/two.bin").exists()
+    # Remembered for the next transfers
+    assert manager.settings.current.conflict == "skip"
+    with pytest.raises(ManagerError) as err:
+        manager.resolve_conflict(job.id, "overwrite")
+    assert err.value.code == "no_conflict"
+
+
+async def test_ask_copies_right_away_when_nothing_exists(manager: JobManager, tree: Path):
+    manager.settings.update({"conflict": "ask"})
+    job = await manager.add_transfer([str(tree / "src/album")], str(tree / "dst"))
+    await wait_for(manager, job)
+    assert job.status == JobStatus.COMPLETED
+    assert job.options.conflict == "overwrite"
+
+
+async def test_cancel_while_waiting_for_a_decision(manager: JobManager, tree: Path):
+    manager.settings.update({"conflict": "ask"})
+    make_tree(tree / "dst", {"single.txt": "old"})
+    job = await manager.add_transfer([str(tree / "src/single.txt")], str(tree / "dst"))
+    await wait_for(manager, job, lambda j: j.status == JobStatus.CONFLICT)
+    await manager.cancel_job(job.id)
+    assert job.status == JobStatus.CANCELED
+    assert not manager.busy()
+
+
+async def test_skip_the_file_being_copied(manager: JobManager, tmp_path: Path):
+    # A name with rsync wildcards must be skipped literally
+    make_tree(
+        tmp_path / "big",
+        {"a[1]*.bin": b"\0" * 1_500_000, "b.bin": b"\0" * 300_000, "c.bin": b"\0" * 300_000},
+    )
+    (tmp_path / "out").mkdir()
+    job = await manager.add_transfer([str(tmp_path / "big")], str(tmp_path / "out"), {"bwlimit": 500})
+    await wait_for(
+        manager, job, lambda j: j.progress.current == "big/a[1]*.bin" and j.progress.bytes_done > 0
+    )
+    await manager.skip_file(job.id)
+    assert job.skipped == ["big/a[1]*.bin"]
+    await wait_for(manager, job, timeout=30)
+    assert job.status == JobStatus.COMPLETED, job.error
+    assert not (tmp_path / "out/big/a[1]*.bin").exists()
+    assert (tmp_path / "out/big/b.bin").stat().st_size == 300_000
+    assert (tmp_path / "out/big/c.bin").exists()
+    states = {f["path"]: f["state"] for f in manager.file_states(job.id)["files"]}
+    assert states == {"big/a[1]*.bin": "skipped", "big/b.bin": "done", "big/c.bin": "done"}
+    assert any("--exclude=/big/a\\[1]\\*.bin" in part for part in manager.command(job))
+    # Running it again copies what was skipped
+    manager.retry_job(job.id)
+    assert job.skipped == []
+    await wait_for(manager, job, lambda j: j.status not in (JobStatus.SCANNING,))
+    await wait_for(manager, job, timeout=30)
+    assert (tmp_path / "out/big/a[1]*.bin").stat().st_size == 1_500_000
+
+
+async def test_verify_compares_contents(manager: JobManager, tree: Path):
+    job = await manager.add_transfer([str(tree / "src/album")], str(tree / "dst"))
+    await wait_for(manager, job)
+    manager.verify_job(job.id)
+    await wait_for(manager, job, lambda j: j.verify != "running")
+    assert job.verify == "ok", job.verify_detail
+    # Same size and date, different bytes: only a content check notices
+    copied = tree / "dst/album/one.txt"
+    stat = copied.stat()
+    copied.write_text("ONE")
+    os.utime(copied, (stat.st_atime, stat.st_mtime))
+    manager.verify_job(job.id)
+    await wait_for(manager, job, lambda j: j.verify != "running")
+    assert job.verify == "mismatch"
+    assert "album/one.txt" in (job.verify_detail or "")
+    # Nothing was copied by the check
+    assert copied.read_text() == "ONE"
+
+
+async def test_moves_cannot_be_verified(manager: JobManager, tree: Path):
+    job = await manager.add_transfer([str(tree / "src/single.txt")], str(tree / "dst"), {"mode": "move"})
+    await wait_for(manager, job)
+    with pytest.raises(ManagerError) as err:
+        manager.verify_job(job.id)
+    assert err.value.code == "cannot_verify_move"
+
+
+async def test_progress_of_the_file_in_flight(manager: JobManager, tmp_path: Path):
+    make_tree(tmp_path / "big", {"a.bin": b"\0" * 400_000, "b.bin": b"\0" * 1_200_000})
+    (tmp_path / "out").mkdir()
+    job = await manager.add_transfer([str(tmp_path / "big")], str(tmp_path / "out"), {"bwlimit": 500})
+    await wait_for(
+        manager, job, lambda j: j.progress.current == "big/b.bin" and j.progress.current_bytes > 0, timeout=30
+    )
+    assert job.progress.current_size == 1_200_000
+    # The first file is not counted as progress of the second one
+    assert job.progress.current_bytes < job.progress.bytes_done
+    await manager.cancel_job(job.id)

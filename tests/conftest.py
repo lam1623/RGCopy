@@ -46,7 +46,8 @@ def tree(tmp_path: Path) -> Path:
 async def manager(tmp_path: Path) -> AsyncIterator[JobManager]:
     manager = JobManager(
         rsync=discover(),
-        settings=SettingsStore(None, Settings(auto_start=True)),
+        # Tests about existing files set "ask" themselves
+        settings=SettingsStore(None, Settings(auto_start=True, conflict="overwrite")),
         fs=FileSystem([tmp_path]),
     )
     await manager.start()

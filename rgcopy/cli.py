@@ -207,7 +207,8 @@ async def _transfer(
         return 2
     manager = JobManager(
         rsync=rsync,
-        settings=SettingsStore(None, Settings(auto_start=False)),
+        # Nobody answers a question in a terminal: existing files follow --conflict (default: replace)
+        settings=SettingsStore(None, Settings(auto_start=False, conflict="overwrite")),
         fs=FileSystem(filesystem_roots()),
     )
     await manager.start()

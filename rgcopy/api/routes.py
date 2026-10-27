@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 
 from .. import __version__, clipboard
+from ..engine.rsync import Resolution
 from ..fs import Entry, Listing, PathError, Root
 from ..jobs import JobStatus, ManagerError
 from ..settings import Settings, SettingsPatch
@@ -31,6 +33,12 @@ class IdsRequest(BaseModel):
 
 class ClearRequest(BaseModel):
     statuses: list[JobStatus] = [JobStatus.COMPLETED]
+
+
+class ResolveRequest(BaseModel):
+    rule: Resolution
+    # Also use this rule for the next transfers instead of asking
+    remember: bool = False
 
 
 class MkdirRequest(BaseModel):
@@ -111,6 +119,23 @@ async def read_clipboard(ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
     return {"action": files.action, "paths": paths, "source": files.source}
 
 
+@router.post("/system/poweroff", status_code=status.HTTP_202_ACCEPTED)
+async def poweroff(ctx: AppContext = Depends(get_ctx)) -> dict[str, str]:
+    """ "Shut down when done": only the desktop app, which runs as the user at the computer."""
+
+    if not ctx.config.desktop:
+        raise ManagerError("poweroff_unavailable", "Only the desktop app can shut the computer down", 409)
+    if ctx.manager.busy():
+        raise ManagerError("busy", "Transfers are still running", 409)
+    command = next(
+        (c for c in (["systemctl", "poweroff"], ["loginctl", "poweroff"]) if shutil.which(c[0])), None
+    )
+    if command is None:
+        raise ManagerError("poweroff_unavailable", "Neither systemctl nor loginctl is available", 409)
+    await asyncio.create_subprocess_exec(*command, stdin=asyncio.subprocess.DEVNULL)
+    return {"status": "shutting down"}
+
+
 @router.post("/window/focus", status_code=status.HTTP_204_NO_CONTENT)
 async def focus_window(ctx: AppContext = Depends(get_ctx)) -> None:
     if ctx.focus_window:
@@ -163,6 +188,23 @@ async def cancel_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict[st
 @router.post("/jobs/{job_id}/retry")
 async def retry_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
     return ctx.manager.dump(ctx.manager.retry_job(job_id))
+
+
+@router.post("/jobs/{job_id}/skip")
+async def skip_file(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
+    return ctx.manager.dump(await ctx.manager.skip_file(job_id))
+
+
+@router.post("/jobs/{job_id}/resolve")
+async def resolve_conflict(
+    job_id: str, payload: ResolveRequest, ctx: AppContext = Depends(get_ctx)
+) -> dict[str, Any]:
+    return ctx.manager.dump(ctx.manager.resolve_conflict(job_id, payload.rule, remember=payload.remember))
+
+
+@router.post("/jobs/{job_id}/verify")
+async def verify_job(job_id: str, ctx: AppContext = Depends(get_ctx)) -> dict[str, Any]:
+    return ctx.manager.dump(ctx.manager.verify_job(job_id))
 
 
 @router.get("/jobs/{job_id}/log")

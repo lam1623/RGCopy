@@ -12,19 +12,21 @@ import uuid
 from collections.abc import Iterable
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
 from .engine.rsync import (
     Progress,
+    Resolution,
     RsyncInfo,
     TransferOptions,
     build_command,
     display_command,
+    popen_kwargs,
 )
 from .engine.runner import RsyncRun, RunResult
-from .fs import FileSystem, PathError, ScanResult, free_space, same_device, scan
+from .fs import Conflict, FileSystem, PathError, ScanResult, find_conflicts, free_space, same_device, scan
 from .settings import SettingsStore
 
 log = logging.getLogger(__name__)
@@ -58,6 +60,8 @@ RSYNC_ERRORS = {
 class JobStatus(StrEnum):
     # Sizes are still being counted
     SCANNING = "scanning"
+    # Some files already exist at the destination: waiting for the user to pick a rule
+    CONFLICT = "conflict"
     QUEUED = "queued"
     RUNNING = "running"
     PAUSED = "paused"
@@ -68,6 +72,8 @@ class JobStatus(StrEnum):
 
 ACTIVE = frozenset({JobStatus.RUNNING, JobStatus.PAUSED})
 FINISHED = frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED})
+# Not finished yet: the queue is not done while any transfer is in one of these
+PENDING = frozenset({JobStatus.SCANNING, JobStatus.CONFLICT, JobStatus.QUEUED, *ACTIVE})
 
 
 class Job(BaseModel):
@@ -87,6 +93,14 @@ class Job(BaseModel):
     warning: str | None = None
     # A move within one filesystem renames instead of copying
     fast_move: bool = False
+    # Files that already exist at the destination (the first ones), while status is "conflict"
+    conflicts: list[Conflict] = []
+    conflict_count: int = 0
+    # Files the user skipped, as rsync names them; rsync excludes them when it restarts
+    skipped: list[str] = []
+    # Content check after the copy: None (not run), "running", "ok", "mismatch" or "error"
+    verify: Literal["running", "ok", "mismatch", "error"] | None = None
+    verify_detail: str | None = None
     created_at: float
     started_at: float | None = None
     finished_at: float | None = None
@@ -153,6 +167,8 @@ class JobManager:
         # The files of each transfer (from the scan) and the ones rsync transferred
         self.files: dict[str, ScanResult] = {}
         self._transferred: dict[str, list[str]] = {}
+        # Transfers whose rsync is being restarted (to skip a file), not canceled
+        self._restart: set[str] = set()
         self.queue_running = False
         self._runs: dict[str, RsyncRun] = {}
         self._job_tasks: dict[str, asyncio.Task[None]] = {}
@@ -300,9 +316,16 @@ class JobManager:
         except ValidationError as exc:
             raise ManagerError("invalid_options", str(exc), 422) from exc
 
-    def command(self, job: Job) -> list[str]:
+    def command(self, job: Job, *, verify: bool = False) -> list[str]:
         rsync = self.rsync.path if self.rsync else "rsync"
-        return build_command(rsync, [Path(s) for s in job.sources], Path(job.destination), job.options)
+        return build_command(
+            rsync,
+            [Path(s) for s in job.sources],
+            Path(job.destination),
+            job.options,
+            excludes=job.skipped,
+            verify=verify,
+        )
 
     def command_text(self, job_id: str) -> str:
         job = self.get(job_id)
@@ -372,6 +395,21 @@ class JobManager:
         job.total_files = result.total_files
         job.total_dirs = result.total_dirs
         job.progress = Progress(total_bytes=job.total_bytes, total_files=job.total_files)
+        if job.options.conflict == "ask":
+            count, conflicts = await asyncio.to_thread(
+                find_conflicts, [Path(s) for s in job.sources], Path(job.destination), result.files
+            )
+            if job.id not in self.jobs or job.status != JobStatus.SCANNING:
+                return
+            if count:
+                job.conflict_count = count
+                job.conflicts = conflicts
+                job.status = JobStatus.CONFLICT
+                self._emit_job(job)
+                self._emit_queue()
+                return
+            # Nothing exists yet: every rule copies the same way
+            job.options = job.options.model_copy(update={"conflict": "overwrite"})
         job.status = JobStatus.QUEUED
         self._emit_job(job)
         if self.settings.current.auto_start:
@@ -412,8 +450,7 @@ class JobManager:
             if job.status == JobStatus.QUEUED:
                 self._launch(job)
                 slots -= 1
-        busy = {JobStatus.SCANNING, JobStatus.QUEUED, *ACTIVE}
-        if not any(j.status in busy for j in self.jobs.values()):
+        if not any(j.status in PENDING for j in self.jobs.values()):
             self.queue_running = False
             self._emit_queue()
             if self._launched_since_start:
@@ -473,20 +510,35 @@ class JobManager:
 
         result: RunResult | None = None
         start_error = ""
-        run = RsyncRun(
-            self.command(job),
-            job.total_bytes,
-            job.total_files,
-            on_progress=functools.partial(self._on_progress, job.id),
-        )
-        self._runs[job.id] = run
-        try:
-            result = await run.run()
-        except OSError as exc:
-            start_error = f"Cannot start rsync: {exc}"
-        finally:
-            self._runs.pop(job.id, None)
-            self._transferred[job.id] = run.names
+        done_before: list[str] = []
+        while job.id not in self._cancel_requested:
+            run = RsyncRun(
+                self.command(job),
+                job.total_bytes,
+                job.total_files,
+                on_progress=functools.partial(self._on_progress, job.id),
+                base_bytes=job.progress.bytes_done if done_before or job.skipped else 0,
+                base_files=len(done_before),
+                sizes=self._sizes(job.id),
+            )
+            self._runs[job.id] = run
+            try:
+                result = await run.run()
+            except OSError as exc:
+                start_error = f"Cannot start rsync: {exc}"
+            finally:
+                self._runs.pop(job.id, None)
+                self._transferred[job.id] = [*done_before, *run.names]
+            if job.id in self._restart and job.id not in self._cancel_requested:
+                # The file in flight was skipped: it is neither done nor copied again
+                self._restart.discard(job.id)
+                skipped = set(job.skipped)
+                done_before = [name for name in self._transferred[job.id] if name not in skipped]
+                self._transferred[job.id] = done_before
+                job.status = JobStatus.RUNNING
+                self._emit_job(job)
+                continue
+            break
         self.logs[job.id] = result.log if result else [start_error]
 
         if (result is not None and result.canceled) or job.id in self._cancel_requested:
@@ -574,9 +626,95 @@ class JobManager:
         self._emit_queue()
         return job
 
+    def _sizes(self, job_id: str) -> dict[str, int]:
+        scanned = self.files.get(job_id)
+        return dict(scanned.files) if scanned else {}
+
+    async def skip_file(self, job_id: str) -> Job:
+        """Skip the file being copied: rsync restarts without it and keeps what is done."""
+
+        job = self.get(job_id)
+        run = self._runs.get(job_id)
+        if job.status not in ACTIVE or run is None:
+            raise ManagerError("not_running", "Only running transfers can skip a file", 409)
+        current = run.progress.current
+        if not current:
+            raise ManagerError("nothing_to_skip", "No file is being copied right now", 409)
+        job.skipped = [*job.skipped, current]
+        self._restart.add(job_id)
+        self._emit_job(job)
+        await run.cancel()
+        return job
+
+    def resolve_conflict(self, job_id: str, rule: Resolution, *, remember: bool = False) -> Job:
+        """Apply the rule the user picked for the files that already exist, then queue the copy."""
+
+        job = self.get(job_id)
+        if job.status != JobStatus.CONFLICT:
+            raise ManagerError("no_conflict", "This transfer is not waiting for a decision", 409)
+        job.options = job.options.model_copy(update={"conflict": rule})
+        job.conflicts = []
+        job.status = JobStatus.QUEUED
+        if remember:
+            self.settings.update({"conflict": rule})
+            self.settings_changed()
+        self._emit_job(job)
+        if self.settings.current.auto_start:
+            self.start_queue(resume=False)
+        else:
+            self._emit_queue()
+        return job
+
+    def verify_job(self, job_id: str) -> Job:
+        """Compare a finished copy with its sources, by content, in the background."""
+
+        job = self.get(job_id)
+        if job.status != JobStatus.COMPLETED:
+            raise ManagerError("not_finished", "Only finished transfers can be verified", 409)
+        if job.options.mode == "move":
+            raise ManagerError("cannot_verify_move", "A move leaves no source to compare with", 409)
+        if job.verify != "running":
+            job.verify = "running"
+            job.verify_detail = None
+            self._emit_job(job)
+            self._spawn(self._verify(job))
+        return job
+
+    async def _verify(self, job: Job) -> None:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *self.command(job, verify=True),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                **popen_kwargs(),
+            )
+            out, err = await proc.communicate()
+        except OSError as exc:
+            job.verify, job.verify_detail = "error", f"Cannot start rsync: {exc}"
+        else:
+            # --itemize-changes: ">f.st......" is a file that differs, ">f+++++++++" one that is missing
+            differ = [
+                line[12:]
+                for line in out.decode("utf-8", "replace").splitlines()
+                if len(line) > 12 and line[0] in "<>ch" and line[1] == "f"
+            ]
+            if proc.returncode not in (0, RSYNC_VANISHED):
+                job.verify = "error"
+                job.verify_detail = err.decode("utf-8", "replace").strip()[-400:] or RSYNC_ERRORS.get(
+                    proc.returncode or 0, f"rsync exited with code {proc.returncode}"
+                )
+            elif differ:
+                job.verify = "mismatch"
+                job.verify_detail = f"{len(differ)} differ: " + ", ".join(differ[:5])
+            else:
+                job.verify, job.verify_detail = "ok", None
+        if job.id in self.jobs:
+            self._emit_job(job)
+
     async def cancel_job(self, job_id: str) -> Job:
         job = self.get(job_id)
-        if job.status in (JobStatus.QUEUED, JobStatus.SCANNING):
+        if job.status in (JobStatus.QUEUED, JobStatus.SCANNING, JobStatus.CONFLICT):
             self._finish(job, JobStatus.CANCELED)
         elif job.status in ACTIVE:
             self._cancel_requested.add(job_id)
@@ -604,6 +742,9 @@ class JobManager:
         job.error = job.warning = None
         job.started_at = job.finished_at = None
         job.fast_move = False
+        # Running again also copies what was skipped
+        job.skipped = []
+        job.verify = job.verify_detail = None
         self.logs.pop(job_id, None)
         self._transferred.pop(job_id, None)
         self._emit_job(job)
@@ -655,15 +796,23 @@ class JobManager:
         if scanned is None:
             return {"total": 0, "listed": 0, "truncated": False, "files": []}
         run = self._runs.get(job_id)
-        names = run.names if run is not None else self._transferred.get(job_id, [])
-        current = names[-1] if run is not None and names else None
-        done = set(names) - ({current} if current else set())
+        previous = self._transferred.get(job_id, [])
+        names = [*previous, *run.names] if run is not None else previous
+        current = run.names[-1] if run is not None and run.names else None
+        skipped = set(job.skipped)
+        done = set(names) - skipped - ({current} if current else set())
+        # Files rsync never named were already up to date (or kept by the conflict rule)
         rest = "pending"
         if job.status == JobStatus.COMPLETED:
-            rest = "done" if job.fast_move else "skipped"
+            rest = "done" if job.fast_move else "uptodate"
         files = []
         for name, size in scanned.files[offset : offset + limit]:
-            state = "done" if name in done else "current" if name == current else rest
+            if name in skipped:
+                state = "skipped"
+            elif name == current:
+                state = "current"
+            else:
+                state = "done" if name in done else rest
             files.append({"path": name, "size": size, "state": state})
         return {
             "total": job.total_files,
@@ -671,6 +820,9 @@ class JobManager:
             "truncated": scanned.truncated,
             "files": files,
         }
+
+    def busy(self) -> bool:
+        return any(j.status in PENDING for j in self.jobs.values())
 
     def all_done(self) -> bool:
         """Nothing left to do and nothing failed (the desktop app may close itself)."""

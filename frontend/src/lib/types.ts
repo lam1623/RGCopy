@@ -1,6 +1,10 @@
-export type JobStatus = "scanning" | "queued" | "running" | "paused" | "completed" | "failed" | "canceled";
+export type JobStatus = "scanning" | "conflict" | "queued" | "running" | "paused" | "completed" | "failed" | "canceled";
 export type Mode = "copy" | "move";
-export type Conflict = "overwrite" | "skip" | "update" | "backup";
+export type Resolution = "overwrite" | "skip" | "update" | "backup";
+/** "ask": RGCopy looks for existing files first and asks which rule to use */
+export type Conflict = "ask" | Resolution;
+export type WhenDone = "nothing" | "close" | "verify" | "shutdown";
+export type Verify = "running" | "ok" | "mismatch" | "error";
 export type Theme = "system" | "dark" | "light";
 
 export interface TransferOptions {
@@ -21,6 +25,8 @@ export interface Progress {
   eta_s: number | null;
   elapsed_s: number;
   current: string | null;
+  current_bytes: number;
+  current_size: number | null;
 }
 
 export interface Job {
@@ -37,10 +43,23 @@ export interface Job {
   error: string | null;
   warning: string | null;
   fast_move: boolean;
+  conflicts: ConflictFile[];
+  conflict_count: number;
+  skipped: string[];
+  verify: Verify | null;
+  verify_detail: string | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
   revision: number;
+}
+
+export interface ConflictFile {
+  path: string;
+  existing_size: number;
+  existing_mtime: number;
+  incoming_size: number;
+  incoming_mtime: number;
 }
 
 export interface QueueState {
@@ -60,7 +79,7 @@ export interface Settings {
   bwlimit: number;
   check_space: boolean;
   notify_on_finish: boolean;
-  close_when_done: boolean;
+  when_done: WhenDone;
   theme: Theme;
   language: "auto" | "es" | "en";
 }
@@ -100,7 +119,7 @@ export interface FsListing {
   truncated: boolean;
 }
 
-export type FileState = "done" | "current" | "pending" | "skipped";
+export type FileState = "done" | "current" | "pending" | "skipped" | "uptodate";
 
 export interface FileStates {
   total: number;

@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import { toast, Toaster } from "sonner";
 import { Logo } from "./components/Brand";
 import { ComposeDialog } from "./components/ComposeDialog";
+import { ConflictDialog } from "./components/ConflictDialog";
 import { FileBrowser } from "./components/FileBrowser";
 import { LoginScreen } from "./components/LoginScreen";
 import { CopierView } from "./components/CopierView";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { ShutdownDialog } from "./components/ShutdownDialog";
 import { Button } from "./components/ui/button";
 import { Spinner } from "./components/ui/misc";
 import { api, onUnauthorized } from "./lib/api";
@@ -142,6 +144,8 @@ export default function App() {
         <CopierView />
         <ComposeDialog />
         <SettingsDialog />
+        <ConflictDialog />
+        <ShutdownDialog />
         <FileBrowser />
       </>
     );
