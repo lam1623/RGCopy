@@ -32,7 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 # Native window; on Linux the Qt backend installs cleanly from wheels
 desktop = ["pywebview>=5.3", "pywebview[qt]>=5.3; sys_platform == 'linux'"]
-dev = ["pytest>=8,<9", "pytest-asyncio>=0.24", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
+dev = ["pytest>=8,<9", "pytest-asyncio>=0.24", "pytest-timeout>=2.3", "httpx>=0.27", "ruff>=0.6", "mypy>=1.11"]
 
 [project.scripts]
 rgcopy = "rgcopy.cli:main"
@@ -53,6 +53,9 @@ artifacts = ["rgcopy/web/dist/**"]
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-ra"
+# A hung test fails after 2 minutes; faulthandler dumps every thread's stack at 90 s first
+timeout = 120
+faulthandler_timeout = 90
 asyncio_mode = "auto"
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
 
