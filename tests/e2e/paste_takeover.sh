@@ -13,6 +13,8 @@ WORK=$(mktemp -d)
 DISPLAY_NUM=${DISPLAY_NUM:-:97}
 trap 'kill $(jobs -p) 2>/dev/null || true; [[ -n ${KEEP:-} ]] || rm -rf "$WORK"' EXIT
 
+# Keep finding a `pip install --user` rgcopy after HOME moves to the scratch directory
+export PYTHONUSERBASE=${PYTHONUSERBASE:-$(python3 -m site --user-base)}
 export HOME=$WORK/home XDG_CONFIG_HOME=$WORK/home/.config XDG_DATA_HOME=$WORK/home/.local/share
 export XDG_RUNTIME_DIR=$WORK/run RGCOPY_RUNTIME_DIR=$WORK/run/rgcopy
 export DISPLAY=$DISPLAY_NUM GDK_BACKEND=x11 NO_AT_BRIDGE=1 RGCOPY_AUTOBUILD=off
