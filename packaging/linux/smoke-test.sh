@@ -5,7 +5,7 @@
 # on Wayland (when Weston is installed).
 #   PORTABLE=1       checks the per-user install of the portable tarball (install.sh) instead
 #   APPIMAGE_FILE=f  checks that AppImage instead
-#   SCREENSHOT=file  saves the window to a PNG (needs ImageMagick)
+#   SCREENSHOT=file  saves the window to a PNG when ImageMagick is installed
 set -u
 work=$(mktemp -d)
 fail() {
@@ -110,7 +110,7 @@ if command -v Xvfb >/dev/null; then
   sleep 10
   kill -0 "$app" 2>/dev/null || fail "the desktop app exited"
   pgrep -f QtWebEngineProcess >/dev/null || fail "the desktop window has no web view"
-  if [ -n "${SCREENSHOT:-}" ]; then
+  if [ -n "${SCREENSHOT:-}" ] && command -v import >/dev/null; then
     DISPLAY=:99 import -window root "$SCREENSHOT" || fail "no screenshot"
   fi
   kill "$app"
