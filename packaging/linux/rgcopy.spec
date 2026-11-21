@@ -9,9 +9,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 # Libraries every desktop Linux has, or that must match the system: the GPU drivers load the
 # system C++ runtime, GTK and friends need the system GLib, NSS and ALSA load plugins from system
-# paths and fontconfig reads the system configuration. Bundling older copies of them breaks on newer
-# distributions. OpenSSL is bundled instead: its soname changes between major versions (Arch moved
-# past libssl.so.3), and the app only imports it through uvicorn for a plain-HTTP localhost server.
+# paths, fontconfig reads the system configuration, and OpenSSL gets its security updates from the
+# distribution. Bundling older copies of them breaks on newer distributions.
 SYSTEM_LIBRARIES = re.compile(
     r"^lib("
     r"stdc\+\+|gcc_s|GL|GLX|GLdispatch|OpenGL|EGL|gbm|drm|udev|systemd|"
@@ -19,7 +18,7 @@ SYSTEM_LIBRARIES = re.compile(
     r"xcb|xcb-dri[23]|xcb-glx|xcb-present|xcb-sync|xshmfence|"
     r"glib-2\.0|gobject-2\.0|gio-2\.0|gmodule-2\.0|gthread-2\.0|"
     r"asound|fontconfig|freetype|harfbuzz|fribidi|png16|expat|z|uuid|dbus-1|"
-    r"nss3|nssutil3|smime3|ssl3|nspr4|plc4|plds4|softokn3|freebl3|freeblpriv3|nssckbi|nssdbm3|"
+    r"nss3|nssutil3|smime3|ssl3|nspr4|plc4|plds4|softokn3|freebl3|freeblpriv3|nssckbi|nssdbm3|ssl|crypto|"
     r"wayland-client|wayland-cursor|wayland-egl|wayland-server"
     r")\.so(\.|$)"
 )
