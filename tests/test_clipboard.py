@@ -64,3 +64,24 @@ def test_read_wayland(monkeypatch: pytest.MonkeyPatch, tmp_path):
     assert files.action == "cut"
     # Files that no longer exist are dropped
     assert files.paths == [str(target)]
+
+
+def test_read_falls_back_to_xwayland(monkeypatch: pytest.MonkeyPatch, tmp_path):
+    # A compositor without data-control: wl-paste sees nothing, XWayland's clipboard has the files
+    target = tmp_path / "copied.txt"
+    target.write_text("x")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setattr(clipboard.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def run(argv: list[str]) -> str | None:
+        if argv[0] == "wl-paste":
+            return None
+        if argv[-1] == "TARGETS":
+            return f"{clipboard.URI_LIST_TARGET}\n"
+        return f"file://{target}\n"
+
+    monkeypatch.setattr(clipboard, "_run", run)
+    files = clipboard.read()
+    assert files.source == "x11"
+    assert files.paths == [str(target)]

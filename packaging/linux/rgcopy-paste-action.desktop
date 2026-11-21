@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Action
+Name=Paste with RGCopy
+Name[es]=Pegar con RGCopy
+Tooltip=Copy or move the copied or cut files here with RGCopy
+Tooltip[es]=Copia o mueve aquí los archivos copiados o cortados con RGCopy
+Icon=io.github.lam1623.rgcopy
+Profiles=folder;
+TargetContext=true
+TargetLocation=true
+TryExec=rgcopy
+
+[X-Action-Profile folder]
+Name=Paste into this folder
+MimeTypes=inode/directory;
+SelectionCount=<2
+Exec=rgcopy paste %f

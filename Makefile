@@ -5,7 +5,7 @@ BIN := $(VENV)/bin
 NPM := npm --prefix frontend
 
 .DEFAULT_GOAL := help
-.PHONY: help install build run serve integrate dev-api dev-ui test e2e lint format typecheck check wheel docker packages clean
+.PHONY: help install build run serve integrate dev-api dev-ui test e2e lint format typecheck check wheel docker packages packages-arm64 clean
 
 help: ## Show this help
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -67,8 +67,11 @@ wheel: build ## Build a wheel with the UI embedded into dist/
 docker: ## Build the Docker image
 	docker build -t rgcopy:latest .
 
-packages: ## Build the .deb, .rpm, Arch and portable Linux packages into dist/linux (Docker)
+packages: ## Build the .deb, .rpm, Arch, AppImage and portable packages into dist/linux (Docker)
 	docker build -f packaging/linux/Dockerfile --output type=local,dest=dist/linux .
+
+packages-arm64: ## Same for arm64 (aarch64), into dist/linux-arm64 (slow under QEMU on x86_64)
+	docker build --platform linux/arm64 -f packaging/linux/Dockerfile --output type=local,dest=dist/linux-arm64 .
 
 clean: ## Remove build artifacts and caches
 	rm -rf dist build rgcopy/web/dist .pytest_cache .mypy_cache .ruff_cache

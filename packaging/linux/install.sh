@@ -20,4 +20,4 @@ ln -sf "$here/rgcopy" "$bin/rgcopy"
 sed -e "s|^Exec=.*|Exec=$here/rgcopy|" -e "s|^Icon=.*|Icon=$here/rgcopy.svg|" "$here/$entry" > "$apps/$entry"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" || true
 echo "RGCopy is in your applications menu, and 'rgcopy' runs it from a terminal."
-echo "Run 'rgcopy integrate' once to paste with Ctrl+V in Nautilus, Nemo and Caja."
+echo "Run 'rgcopy integrate' once to paste with Ctrl+V in Nautilus, Nemo, Caja and Thunar."

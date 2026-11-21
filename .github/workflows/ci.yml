@@ -59,7 +59,7 @@ jobs:
           retention-days: 7
 
   file-managers:
-    name: Ctrl+V in Nautilus, Nemo and Caja
+    name: Ctrl+V in Nautilus, Nemo, Caja and Thunar
     needs: [backend]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -69,7 +69,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends rsync nautilus python3-nautilus gir1.2-gtk-4.0 \
-            nemo caja xvfb xdotool xclip dbus-x11 at-spi2-core
+            nemo caja thunar xvfb xdotool xclip dbus-x11 at-spi2-core
       - run: pip install --user --break-system-packages .
       - run: tests/e2e/paste_takeover.sh
 

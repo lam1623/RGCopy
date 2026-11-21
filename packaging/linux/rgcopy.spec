@@ -111,7 +111,8 @@ a.binaries = [entry for entry in binaries if os.path.basename(entry[0]) in kept]
 
 def _system_library(soname):
     out = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
-    match = re.search(rf"^\s*{re.escape(soname)} \(libc6,x86-64\) => (\S+)$", out, re.M)
+    # "(libc6,x86-64)" or "(libc6,AArch64)": the build system's own architecture
+    match = re.search(rf"^\s*{re.escape(soname)} \(libc6,[^)]*\) => (\S+)$", out, re.M)
     if not match:
         raise SystemExit(f"{soname} is not on the build system")
     return match.group(1)

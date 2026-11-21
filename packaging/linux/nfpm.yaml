@@ -1,7 +1,8 @@
-# nfpm config for the .deb, .rpm and Arch packages; package.sh runs it inside the packaging image.
+# nfpm config for the .deb, .rpm and Arch packages; package.sh fills in the @...@ values (the
+# architecture and the glibc/libstdc++ versions the bundle needs) and runs it in the packaging image.
 # The app is self-contained in /opt/rgcopy; only libraries every desktop has come from the system.
 name: rgcopy
-arch: amd64
+arch: @ARCH@
 platform: linux
 version: ${VERSION}
 release: 1
@@ -13,8 +14,8 @@ homepage: https://github.com/lam1623/RGCopy
 license: GPL-3.0-only
 description: |-
   File copy queue for Linux powered by rsync.
-  Ctrl+C and Ctrl+V in Nautilus, Nemo or Caja copy through RGCopy, like TeraCopy on
-  Windows: one window with every transfer, pause, skip and resume, the speed and the time
+  Ctrl+C and Ctrl+V in Nautilus, Nemo, Caja or Thunar copy through RGCopy, like TeraCopy
+  on Windows, and "Paste with RGCopy" is in the menus of Dolphin and PCManFM-Qt: one window with every transfer, pause, skip and resume, the speed and the time
   left, a question before replacing existing files, and checksum verification.
 
 contents:
@@ -28,11 +29,19 @@ contents:
     dst: /usr/share/applications/io.github.lam1623.rgcopy.desktop
   - src: ./io.github.lam1623.rgcopy.metainfo.xml
     dst: /usr/share/metainfo/io.github.lam1623.rgcopy.metainfo.xml
-  # "Paste with RGCopy" in Dolphin's menu for every user (Plasma 6)
+  # "Paste with RGCopy" in the file managers' menus for every user, right after installing:
+  # Dolphin on Plasma 6 and Plasma 5, Nemo, and the FreeDesktop file manager actions that
+  # PCManFM-Qt (LXQt) and Caja (with caja-actions) read
   - src: ./rgcopy-paste.desktop
     dst: /usr/share/kio/servicemenus/rgcopy-paste.desktop
     file_info:
       mode: 0755
+  - src: ./rgcopy-paste.desktop
+    dst: /usr/share/kservices5/ServiceMenus/rgcopy-paste.desktop
+  - src: ./rgcopy-paste.nemo_action
+    dst: /usr/share/nemo/actions/rgcopy-paste.nemo_action
+  - src: ./rgcopy-paste-action.desktop
+    dst: /usr/share/file-manager/actions/rgcopy-paste.desktop
   - src: ./icons/hicolor/
     dst: /usr/share/icons/hicolor
     type: tree
@@ -48,12 +57,13 @@ contents:
 
 overrides:
   # Exactly what the bundle links to outside itself, and the glibc and libstdc++ versions it was
-  # built against (package.sh checks the rpm list below; keep the deb and Arch lists in step)
+  # built against (package.sh checks the rpm list below against the bundle; keep the deb and
+  # Arch lists in step)
   deb:
     depends:
       - rsync (>= 3.1)
       - libasound2t64 | libasound2
-      - libc6 (>= 2.35)
+      - libc6 (>= @GLIBC@)
       - libdbus-1-3
       - libegl1
       - libexpat1
@@ -66,7 +76,7 @@ overrides:
       - libnspr4
       - libnss3
       - libssl3t64 | libssl3
-      - libstdc++6 (>= 11)
+      - libstdc++6 (>= @GCC@)
       - libudev1
       - libuuid1
       - libwayland-client0
@@ -94,11 +104,13 @@ overrides:
       # Ctrl+V through RGCopy in Nautilus (`rgcopy integrate`)
       - python3-nautilus
       - gir1.2-gtk-4.0
+      # Desktop notifications from `rgcopy paste`
+      - libnotify-bin
   rpm:
     depends:
       - /usr/bin/rsync
       - libasound.so.2()(64bit)
-      - libc.so.6(GLIBC_2.35)(64bit)
+      - libc.so.6(GLIBC_@GLIBC@)(64bit)
       - libcrypto.so.3()(64bit)
       - libdbus-1.so.3()(64bit)
       - libEGL.so.1()(64bit)
@@ -116,7 +128,7 @@ overrides:
       - libsmime3.so()(64bit)
       - libssl.so.3()(64bit)
       - libstdc++.so.6()(64bit)
-      - libstdc++.so.6(GLIBCXX_3.4.29)(64bit)
+      - libstdc++.so.6(GLIBCXX_@GLIBCXX@)(64bit)
       - libudev.so.1()(64bit)
       - libuuid.so.1()(64bit)
       - libwayland-client.so.0()(64bit)
@@ -143,6 +155,7 @@ overrides:
       - xdg-utils
     suggests:
       - nautilus-python
+      - libnotify
   archlinux:
     depends:
       - rsync
@@ -153,7 +166,7 @@ overrides:
       - freetype2
       - gcc-libs
       - glib2
-      - glibc
+      - glibc>=@GLIBC@
       - libglvnd
       - libx11
       - libxcb

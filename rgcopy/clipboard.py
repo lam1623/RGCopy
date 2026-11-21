@@ -80,18 +80,25 @@ def parse_gnome(data: str, uid: int | None = None) -> ClipboardFiles:
     return ClipboardFiles(action=action, paths=paths)
 
 
-def _reader() -> tuple[str, list[str], list[str]] | None:
-    """(name, command listing targets, command reading a target) for this session."""
+def _readers() -> list[tuple[str, list[str], list[str]]]:
+    """(name, command listing targets, command reading a target) for this session, best first.
 
+    On Wayland the X11 clipboard of XWayland is the fallback: wl-paste needs the compositor's
+    data-control protocol or a focusable surface, and some compositors offer neither.
+    """
+
+    readers = []
     if os.environ.get("WAYLAND_DISPLAY") and shutil.which("wl-paste"):
-        return "wayland", ["wl-paste", "--list-types"], ["wl-paste", "--no-newline", "--type"]
+        readers.append(("wayland", ["wl-paste", "--list-types"], ["wl-paste", "--no-newline", "--type"]))
     if os.environ.get("DISPLAY") and shutil.which("xclip"):
-        return (
-            "x11",
-            ["xclip", "-selection", "clipboard", "-o", "-t", "TARGETS"],
-            ["xclip", "-selection", "clipboard", "-o", "-t"],
+        readers.append(
+            (
+                "x11",
+                ["xclip", "-selection", "clipboard", "-o", "-t", "TARGETS"],
+                ["xclip", "-selection", "clipboard", "-o", "-t"],
+            )
         )
-    return None
+    return readers
 
 
 def _run(argv: list[str]) -> str | None:
@@ -105,16 +112,25 @@ def _run(argv: list[str]) -> str | None:
 
 
 def available() -> bool:
-    return _reader() is not None
+    return bool(_readers())
 
 
 def read() -> ClipboardFiles:
     """The files on the desktop clipboard; empty when it holds none or cannot be read."""
 
-    reader = _reader()
-    if reader is None:
+    readers = _readers()
+    if not readers:
         return ClipboardFiles()
-    name, list_cmd, read_cmd = reader
+    files = ClipboardFiles()
+    for name, list_cmd, read_cmd in readers:
+        files = _read_with(list_cmd, read_cmd)
+        files.source = name
+        if files.paths:
+            break
+    return files
+
+
+def _read_with(list_cmd: list[str], read_cmd: list[str]) -> ClipboardFiles:
     targets = set((_run(list_cmd) or "").split())
     special = next((t for t in (GNOME_TARGET, MATE_TARGET) if t in targets), None)
     if special:
@@ -126,6 +142,5 @@ def read() -> ClipboardFiles:
     else:
         text = _run([*read_cmd, "text/plain"]) or ""
         files = parse_gnome(text) if text.startswith("x-special/nautilus-clipboard") else ClipboardFiles()
-    files.source = name
     files.paths = [p for p in files.paths if os.path.lexists(p)]
     return files
