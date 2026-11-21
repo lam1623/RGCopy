@@ -4,6 +4,8 @@ name: Packages and releases
 # its distributions. The push that changes __version__ (rgcopy/__init__.py) on standalone, a v*
 # tag or a run started by hand then publishes that version: the Docker image for amd64 and arm64
 # is pushed to ghcr.io and tried first, and only then the GitHub release gets every package.
+# A tag with a suffix (v2.0.0-rc1, v2.0.0-test.1) publishes a pre-release: :latest and the
+# repository's latest release stay where they are.
 on:
   push:
     branches: [standalone]
@@ -33,6 +35,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      release-version: ${{ steps.version.outputs.release-version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -51,11 +56,24 @@ jobs:
           deb=$(basename dist/linux/rgcopy_*-1_amd64.deb)
           version=${deb#rgcopy_}
           version=${version%-1_amd64.deb}
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "The tag $GITHUB_REF_NAME does not match the version $version" >&2
-            exit 1
+          tag="v$version"
+          prerelease=false
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            case "$GITHUB_REF_NAME" in
+              "v$version") ;;
+              "v$version"-?*) prerelease=true ;;
+              *)
+                echo "The tag $GITHUB_REF_NAME does not match the version $version (v$version or v$version-<suffix>)" >&2
+                exit 1 ;;
+            esac
+            tag=$GITHUB_REF_NAME
           fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "release-version=${tag#v}"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
       - run: ls -l dist/linux && cat dist/linux/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
@@ -168,7 +186,8 @@ jobs:
       contents: read
       packages: write
     env:
-      VERSION: ${{ needs.build.outputs.version }}
+      # The image tag: the package version, or the tag's own name for a pre-release
+      VERSION: ${{ needs.build.outputs.release-version }}
     steps:
       - uses: actions/checkout@v4
       # Image names must be lower case; the repository is "RGCopy"
@@ -215,6 +234,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.build.outputs.version }}
+      TAG: ${{ needs.build.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.build.outputs.release-version }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -227,17 +249,33 @@ jobs:
           path: dist/linux
       - name: Publish the packages
         run: |
-          tag="v$VERSION"
-          if gh release view "$tag" >/dev/null 2>&1; then
+          if gh release view "$TAG" >/dev/null 2>&1; then
             # A tag pushed for a release drafted on GitHub: attach the packages to it
             if [ "$GITHUB_REF_TYPE" = tag ]; then
-              gh release upload "$tag" dist/linux/* --clobber
+              gh release upload "$TAG" dist/linux/* --clobber
             fi
           else
-            sed -e "s/@VERSION@/$VERSION/g" -e "s|@IMAGE@|$IMAGE|g" .github/release-notes.md > notes.md
-            gh release create "$tag" dist/linux/* --target "$GITHUB_SHA" \
-              --title "RGCopy $VERSION" --notes-file notes.md --generate-notes
+            # The image line first: a pre-release's image is tagged with the tag's own name
+            sed -e "s|@IMAGE@:@VERSION@|$IMAGE:$RELEASE_VERSION|g" \
+              -e "s/@VERSION@/$VERSION/g" -e "s|@IMAGE@|$IMAGE|g" .github/release-notes.md > notes.md
+            args=(--target "$GITHUB_SHA" --title "RGCopy $RELEASE_VERSION" --notes-file notes.md --generate-notes)
+            [ "$GITHUB_REF_TYPE" = tag ] && args+=(--verify-tag)
+            [ "$PRERELEASE" = true ] && args+=(--prerelease --latest=false)
+            gh release create "$TAG" dist/linux/* "${args[@]}"
           fi
+      - name: Check every package is attached
+        run: |
+          assets=$(gh release view "$TAG" --json assets -q '.assets[].name')
+          echo "$assets"
+          missing=0
+          for name in "rgcopy_${VERSION}-1_amd64.deb" "rgcopy-${VERSION}-1.x86_64.rpm" \
+                      "rgcopy-${VERSION}-1-x86_64.pkg.tar.zst" "rgcopy-${VERSION}-linux-x86_64.tar.gz" SHA256SUMS; do
+            grep -qxF "$name" <<<"$assets" || { echo "::error::$TAG is missing $name"; missing=1; }
+          done
+          # The published files must be the ones SHA256SUMS lists
+          mkdir check && gh release download "$TAG" -D check
+          (cd check && sha256sum -c SHA256SUMS)
+          exit $missing
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -246,7 +284,8 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Point :latest at this release
         run: |
-          # An older version released later (a tag on an old commit) leaves :latest alone
-          if [ "$(gh release view --json tagName -q .tagName)" = "v$VERSION" ]; then
+          # A pre-release, or an older version released later (a tag on an old commit), leaves
+          # :latest alone
+          if [ "$PRERELEASE" != true ] && [ "$(gh release view --json tagName -q .tagName)" = "$TAG" ]; then
             docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:$VERSION"
           fi
