@@ -33,7 +33,8 @@ FROM bundle-${TARGETARCH} AS bundle
 ARG UV_VERSION PYTHON_VERSION
 ARG DEBIAN_FRONTEND=noninteractive
 # binutils for PyInstaller, and the libraries it resolves Qt against (24.04 renamed some for the
-# 64-bit time_t transition: libasound2t64, libglib2.0-0t64)
+# 64-bit time_t transition: libasound2t64, libglib2.0-0t64). The aarch64 Qt wheels also link to
+# libwebp, opus, snappy, lcms2, minizip and libSM/libICE from the system: PyInstaller bundles them.
 RUN t64() { if apt-cache show "$1t64" >/dev/null 2>&1; then echo "$1t64"; else echo "$1"; fi; } \
  && apt-get update && apt-get install -y --no-install-recommends ca-certificates curl binutils \
       "$(t64 libasound2)" libdbus-1-3 libegl1 libfontconfig1 libgbm1 libgl1 "$(t64 libglib2.0-0)" libnss3 \
@@ -41,6 +42,7 @@ RUN t64() { if apt-cache show "$1t64" >/dev/null 2>&1; then echo "$1t64"; else e
       libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
       libxcb-xinerama0 libxcb-xkb1 libxcomposite1 libxdamage1 libxkbcommon-x11-0 libxkbcommon0 \
       libxkbfile1 libxrandr2 libxshmfence1 libxtst6 \
+      libice6 libsm6 liblcms2-2 "$(t64 libminizip1)" libopus0 libsnappy1v5 libwebp7 libwebpdemux2 libwebpmux3 \
  && rm -rf /var/lib/apt/lists/* \
  && curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-$(uname -m)-unknown-linux-gnu.tar.gz" \
       | tar -xz --strip-components=1 -C /usr/local/bin
