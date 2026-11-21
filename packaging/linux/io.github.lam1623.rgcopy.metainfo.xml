@@ -11,7 +11,7 @@
   </developer>
   <description>
     <p>
-      RGCopy takes over Ctrl+V in your file manager: copy or cut files in Nautilus, Nemo or Caja,
+      RGCopy takes over Ctrl+V in your file manager: copy or cut files in Nautilus, Nemo, Caja or Thunar,
       paste them, and RGCopy copies them with rsync in one window that lists every transfer.
     </p>
     <ul>
@@ -22,7 +22,7 @@
       <li>Moves within one disk are instant</li>
     </ul>
     <p xml:lang="es">
-      RGCopy toma el Ctrl+V de tu gestor de archivos: copia o corta en Nautilus, Nemo o Caja, pega,
+      RGCopy toma el Ctrl+V de tu gestor de archivos: copia o corta en Nautilus, Nemo, Caja o Thunar, pega,
       y RGCopy hace la copia con rsync en una ventana que lista todas las transferencias.
     </p>
   </description>

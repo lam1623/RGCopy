@@ -303,6 +303,9 @@ def cmd_paste(args: argparse.Namespace) -> int:
         destination = uri_to_path(args.destination) or args.destination
     else:
         destination = integration.destination_from_env() or os.getcwd()
+    # A file manager may hand over the selected file rather than its folder
+    if Path(destination).is_file():
+        destination = str(Path(destination).parent)
     destination = str(Path(destination).absolute())
     files = clipboard.read()
     if files.source is None:
@@ -321,19 +324,21 @@ def cmd_paste(args: argparse.Namespace) -> int:
 
 def cmd_integrate(args: argparse.Namespace) -> int:
     if args.uninstall:
-        closed = integration.quit_file_managers(["nemo", "caja"])
+        closed = integration.quit_file_managers(["nemo", "caja", "thunar"])
         for path in integration.uninstall():
             print(f"Removed {path}")
         warnings: list[str] = []
     else:
         takeover = not args.no_takeover
-        closed = integration.quit_file_managers(["nautilus", "nemo", "caja"] if takeover else [])
+        closed = integration.quit_file_managers(["nautilus", "nemo", "caja", "thunar"] if takeover else [])
         paths, warnings = integration.install(args.accel or None, takeover=takeover)
         for path in paths:
             print(f"Installed {path}")
         if takeover:
             print("\nCtrl+C / Ctrl+X in the file manager, then Ctrl+V: RGCopy copies or moves the files.")
-        print('"Paste with RGCopy" is also in the right-click menu, under Scripts.')
+        print(
+            '"Paste with RGCopy" is also in the right-click menu (under Scripts in Nautilus, Nemo and Caja).'
+        )
     for warning in warnings:
         print(f"\nwarning: {warning}", file=sys.stderr)
     if closed:

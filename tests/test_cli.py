@@ -130,3 +130,79 @@ def test_instance_file_is_private_and_stale_ones_are_ignored(tmp_path: Path, mon
     assert instance.running() is None
     instance.withdraw(me)
     assert instance.read() is None
+
+
+def test_integrate_thunar_dolphin_and_lxqt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from xml.etree import ElementTree
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    installed = {"rgcopy", "thunar", "dolphin", "pcmanfm-qt"}
+    monkeypatch.setattr(
+        integration.shutil, "which", lambda name: f"/usr/bin/{name}" if name in installed else None
+    )
+    monkeypatch.setattr(integration, "quit_file_managers", lambda names: [])
+    # The user's own Thunar action and shortcuts are kept
+    thunar = tmp_path / "config/Thunar"
+    thunar.mkdir(parents=True)
+    (thunar / "uca.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<actions><action><unique-id>1-1</unique-id>'
+        "<name>Open Terminal Here</name><command>xfce4-terminal</command></action></actions>\n"
+    )
+    (thunar / "accels.scm").write_text('(gtk_accel_path "<Actions>/ThunarWindow/new-tab" "<Primary>t")\n')
+
+    assert cli.main(["integrate"]) == 0
+    for _ in range(2):  # twice: nothing is duplicated
+        actions = ElementTree.parse(thunar / "uca.xml").getroot()
+        ids = [a.findtext("unique-id") for a in actions]
+        assert ids == ["1-1", integration.THUNAR_ACTION_ID]
+        ours = actions[1]
+        assert ours.findtext("command") == "/usr/bin/rgcopy paste %f"
+        assert ours.find("directories") is not None
+        accels = (thunar / "accels.scm").read_text()
+        assert accels.count('"<Primary>v"') == 1
+        assert f'(gtk_accel_path "{integration.THUNAR_ACTION_PATH}" "<Primary>v")' in accels
+        assert '(gtk_accel_path "<Actions>/ThunarActionManager/paste" "")' in accels
+        assert "new-tab" in accels
+        cli.main(["integrate"])
+
+    for menu in ("data/kio/servicemenus", "data/kservices5/ServiceMenus"):
+        path = tmp_path / menu / "rgcopy-paste.desktop"
+        assert "Exec=/usr/bin/rgcopy paste %f" in path.read_text() and os.access(path, os.X_OK)
+    action = tmp_path / "data/file-manager/actions/rgcopy-paste.desktop"
+    assert "Type=Action" in action.read_text() and "TargetLocation=true" in action.read_text()
+
+    assert cli.main(["integrate", "--uninstall"]) == 0
+    actions = ElementTree.parse(thunar / "uca.xml").getroot()
+    assert [a.findtext("unique-id") for a in actions] == ["1-1"]
+    assert (
+        thunar / "accels.scm"
+    ).read_text() == '(gtk_accel_path "<Actions>/ThunarWindow/new-tab" "<Primary>t")\n'
+    assert not action.exists()
+    assert not (tmp_path / "data/kservices5/ServiceMenus/rgcopy-paste.desktop").exists()
+
+
+def test_launcher_inside_an_appimage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    appimage = tmp_path / "RGCopy-2.0.0-x86_64.AppImage"
+    appimage.write_text("")
+    monkeypatch.setenv("APPIMAGE", str(appimage))
+    assert integration.launcher_command() == [str(appimage)]
+    monkeypatch.setenv("APPIMAGE", str(tmp_path / "gone.AppImage"))
+    assert integration.launcher_command() != [str(tmp_path / "gone.AppImage")]
+
+
+def test_paste_into_the_folder_of_a_selected_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = tmp_path / "src.txt"
+    source.write_text("x")
+    selected = tmp_path / "dst" / "selected.txt"
+    selected.parent.mkdir()
+    selected.write_text("y")
+    monkeypatch.setattr(clipboard, "read", lambda: ClipboardFiles("copy", [str(source)], "x11"))
+    seen = {}
+    monkeypatch.setattr(
+        cli, "_run_transfer", lambda paths, dest, options, args: seen.setdefault("dest", dest) and 0
+    )
+    assert cli.main(["paste", "--headless", str(selected)]) == 0
+    assert seen["dest"] == str(selected.parent)

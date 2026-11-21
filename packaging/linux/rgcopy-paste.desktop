@@ -3,6 +3,7 @@ Type=Service
 MimeType=inode/directory;
 Actions=rgcopyPaste;
 X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+X-KDE-Priority=TopLevel
 
 [Desktop Action rgcopyPaste]
 Name=Paste with RGCopy

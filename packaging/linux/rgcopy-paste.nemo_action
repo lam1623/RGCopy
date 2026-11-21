@@ -1,0 +1,10 @@
+[Nemo Action]
+Name=Paste with RGCopy
+Name[es]=Pegar con RGCopy
+Comment=Copy or move the copied or cut files here with RGCopy
+Comment[es]=Copia o mueve aquí los archivos copiados o cortados con RGCopy
+Exec=rgcopy paste %P
+Icon-Name=io.github.lam1623.rgcopy
+Selection=none
+Extensions=any;
+Dependencies=rgcopy;

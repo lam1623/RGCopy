@@ -17,6 +17,7 @@ jobs:
   backend:
     name: Python ${{ matrix.python }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -33,11 +34,12 @@ jobs:
       - run: ruff check rgcopy tests
       - run: ruff format --check rgcopy tests
       - run: mypy
-      - run: pytest -q
+      - run: pytest -v --durations=10
 
   frontend:
     name: Web UI
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
@@ -57,16 +59,17 @@ jobs:
           retention-days: 7
 
   file-managers:
-    name: Ctrl+V in Nautilus, Nemo and Caja
+    name: Ctrl+V in Nautilus, Nemo, Caja and Thunar
     needs: [backend]
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install the file managers and an X server
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends rsync nautilus python3-nautilus gir1.2-gtk-4.0 \
-            nemo caja xvfb xdotool xclip dbus-x11 at-spi2-core
+            nemo caja thunar xvfb xdotool xclip dbus-x11 at-spi2-core
       - run: pip install --user --break-system-packages .
       - run: tests/e2e/paste_takeover.sh
 
@@ -74,6 +77,7 @@ jobs:
     name: Docker image
     needs: [backend, frontend]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

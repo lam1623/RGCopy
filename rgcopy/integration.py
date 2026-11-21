@@ -1,4 +1,9 @@
-"""Hook RGCopy into the desktop: menu entry and "Paste with RGCopy" in the file managers."""
+"""Hook RGCopy into the desktop: menu entry and "Paste with RGCopy" in the file managers.
+
+Nautilus, Nemo and Caja get a script (and Ctrl+V with the takeover), Thunar a custom action (and
+Ctrl+V), Dolphin a service menu for Plasma 5 and 6, and PCManFM-Qt (LXQt) a FreeDesktop file
+manager action.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,7 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 from urllib.parse import quote
+from xml.etree import ElementTree
 
 from .clipboard import uri_to_path
 
@@ -25,6 +31,12 @@ MARKER = "# Installed by `rgcopy integrate`"
 NAUTILUS_EXTENSION = "rgcopy_paste.py"
 # GtkAccelMap action of the file manager's own Paste (Nemo and Caja)
 NATIVE_PASTE_PATH = "<Actions>/DirViewActions/Paste"
+# Thunar custom action: its id names the accel path Thunar gives it
+THUNAR_ACTION_ID = "rgcopy-paste"
+THUNAR_ACTION_PATH = f"<Actions>/ThunarActions/uca-action-{THUNAR_ACTION_ID}"
+# Thunar's own Paste: ThunarActionManager since 4.18, ThunarStandardView before
+THUNAR_PASTE_PATHS = ("<Actions>/ThunarActionManager/paste", "<Actions>/ThunarStandardView/paste")
+DOLPHIN_MENU = "rgcopy-paste.desktop"
 
 
 @dataclass(frozen=True)
@@ -72,6 +84,10 @@ def destination_from_env(env: dict[str, str] | None = None) -> str | None:
 def launcher_command() -> list[str]:
     """How to start this very RGCopy from a desktop file or a script."""
 
+    # Inside an AppImage sys.argv[0] is under a mount point that changes on every run
+    appimage = os.environ.get("APPIMAGE")
+    if appimage and Path(appimage).is_file():
+        return [appimage]
     found = shutil.which("rgcopy")
     if found:
         return [found]
@@ -117,6 +133,97 @@ def _accel_map_files() -> dict[str, Path]:
     }
 
 
+def _thunar_dir() -> Path:
+    return _config_home() / "Thunar"
+
+
+def _dolphin_menus() -> list[Path]:
+    """Service menu locations: Plasma 6 (kio) and Plasma 5 (kservices5)."""
+
+    return [
+        _data_home() / "kio" / "servicemenus" / DOLPHIN_MENU,
+        _data_home() / "kservices5" / "ServiceMenus" / DOLPHIN_MENU,
+    ]
+
+
+def _file_manager_action() -> Path:
+    """FreeDesktop file manager action (PCManFM-Qt, PCManFM, Caja with caja-actions)."""
+
+    return _data_home() / "file-manager" / "actions" / DOLPHIN_MENU
+
+
+def _thunar_actions_without_ours(path: Path) -> ElementTree.Element:
+    root = ElementTree.Element("actions")
+    if path.exists():
+        try:
+            root = ElementTree.parse(path).getroot()
+        except ElementTree.ParseError:
+            # Never destroy the user's actions: keep a copy of the unreadable file
+            path.replace(path.with_suffix(".xml.bak"))
+    for action in list(root):
+        if action.findtext("unique-id") == THUNAR_ACTION_ID:
+            root.remove(action)
+    return root
+
+
+def _write_thunar_actions(path: Path, root: ElementTree.Element) -> None:
+    ElementTree.indent(root, space="\t")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = ElementTree.tostring(root, encoding="unicode")
+    path.write_text('<?xml version="1.0" encoding="UTF-8"?>\n' + data + "\n", "utf-8")
+
+
+def _install_thunar_action() -> Path:
+    """ "Paste with RGCopy" in Thunar's right-click menu (folders, files and the folder itself)."""
+
+    path = _thunar_dir() / "uca.xml"
+    root = _thunar_actions_without_ours(path)
+    action = ElementTree.SubElement(root, "action")
+    for tag, text in (
+        ("icon", APP_ID),
+        ("name", SCRIPT_NAME),
+        ("submenu", ""),
+        ("unique-id", THUNAR_ACTION_ID),
+        ("command", shlex.join([*launcher_command(), "paste"]) + " %f"),
+        ("description", "Copy or move the copied or cut files here with RGCopy"),
+        ("range", ""),
+        ("patterns", "*"),
+    ):
+        ElementTree.SubElement(action, tag).text = text
+    for tag in (
+        "startup-notify",
+        "directories",
+        "audio-files",
+        "image-files",
+        "other-files",
+        "text-files",
+        "video-files",
+    ):
+        ElementTree.SubElement(action, tag)
+    _write_thunar_actions(path, root)
+    return path
+
+
+def _uninstall_thunar_action() -> Path | None:
+    path = _thunar_dir() / "uca.xml"
+    if not path.exists() or THUNAR_ACTION_ID not in path.read_text("utf-8"):
+        return None
+    _write_thunar_actions(path, _thunar_actions_without_ours(path))
+    return path
+
+
+def _rewrite_thunar_accels(path: Path, takeover: bool) -> None:
+    """Thunar's accels.scm: Ctrl+V to our action and none to Thunar's Paste, or back."""
+
+    current = path.read_text("utf-8").splitlines() if path.exists() else []
+    ours = (THUNAR_ACTION_PATH, *THUNAR_PASTE_PATHS)
+    kept = [line for line in current if not any(f'"{p}"' in line for p in ours)]
+    if takeover:
+        kept += [_accel_line(p, "") for p in THUNAR_PASTE_PATHS]
+        kept.append(_accel_line(THUNAR_ACTION_PATH, "<Primary>v"))
+    _write(path, "\n".join(kept) + "\n")
+
+
 def script_accel_path(script: Path) -> str:
     """Accel path Nemo and Caja give a script: its URI with "/" written as "\\s"."""
 
@@ -149,7 +256,13 @@ def _nautilus_python_available() -> bool:
 def _glob_nautilus_python() -> list[str]:
     import glob
 
-    return glob.glob("/usr/lib*/**/nautilus/extensions-4/libnautilus-python.so", recursive=True)
+    # Fixed depths only: a recursive "**" follows symlink loops (e.g. /usr/lib/llvm-*/build)
+    # and never returns. Covers /usr/lib (Arch), /usr/lib64 (Fedora, openSUSE) and the
+    # multiarch /usr/lib/<triplet> (Debian, Ubuntu).
+    found: list[str] = []
+    for pattern in ("/usr/lib*/nautilus", "/usr/lib*/*/nautilus"):
+        found += glob.glob(f"{pattern}/extensions-4/libnautilus-python.so")
+    return found
 
 
 def quit_file_managers(names: list[str]) -> list[str]:
@@ -190,6 +303,10 @@ def take_over_paste(managers: list[FileManager]) -> tuple[list[Path], list[str]]
                     "Ctrl+V in Nautilus needs nautilus-python: sudo apt install python3-nautilus "
                     "(Fedora: nautilus-python, Arch: python-nautilus). Ctrl+Shift+V works meanwhile."
                 )
+        elif manager.name == "thunar":
+            accels = _thunar_dir() / "accels.scm"
+            _rewrite_thunar_accels(accels, takeover=True)
+            written.append(accels)
         elif manager.name in accel_maps:
             accel_map = accel_maps[manager.name]
             _rewrite_accel_map(
@@ -235,6 +352,24 @@ def _dolphin_menu() -> str:
     )
 
 
+def _file_manager_action_entry() -> str:
+    exec_line = shlex.join([*launcher_command(), "paste"])
+    return (
+        "[Desktop Entry]\n"
+        "Type=Action\n"
+        f"Name={SCRIPT_NAME}\n"
+        "Name[es]=Pegar con RGCopy\n"
+        f"Icon={APP_ID}\n"
+        "Profiles=folder;\n"
+        "TargetContext=true\n"
+        "TargetLocation=true\n\n"
+        "[X-Action-Profile folder]\n"
+        "MimeTypes=inode/directory;\n"
+        "SelectionCount=<2\n"
+        f"Exec={exec_line} %f\n"
+    )
+
+
 def install(accel: str | None = DEFAULT_ACCEL, *, takeover: bool = True) -> tuple[list[Path], list[str]]:
     """Menu entry, icon and "Paste with RGCopy"; ``takeover`` also gives it Ctrl+V."""
 
@@ -256,10 +391,17 @@ def install(accel: str | None = DEFAULT_ACCEL, *, takeover: bool = True) -> tupl
             installed.append(manager)
             if manager.name == "nautilus" and accel:
                 written.append(_set_accel(accel))
-    if shutil.which("dolphin") or (_data_home() / "kio" / "servicemenus").is_dir():
-        menu = _data_home() / "kio" / "servicemenus" / "rgcopy-paste.desktop"
-        _write(menu, _dolphin_menu(), executable=True)
-        written.append(menu)
+    if shutil.which("thunar") or (_thunar_dir() / "uca.xml").exists():
+        written.append(_install_thunar_action())
+        installed.append(FileManager("thunar", _thunar_dir(), "THUNAR"))
+    if shutil.which("dolphin") or any(menu.parent.is_dir() for menu in _dolphin_menus()):
+        # Plasma 6 runs only service menus that are executable
+        for menu in _dolphin_menus():
+            _write(menu, _dolphin_menu(), executable=True)
+            written.append(menu)
+    if shutil.which("pcmanfm-qt") or shutil.which("pcmanfm") or _file_manager_action().parent.is_dir():
+        _write(_file_manager_action(), _file_manager_action_entry())
+        written.append(_file_manager_action())
     warnings: list[str] = []
     if takeover:
         files, warnings = take_over_paste(installed)
@@ -272,7 +414,8 @@ def uninstall() -> list[Path]:
     candidates = [
         _data_home() / "icons" / "hicolor" / "scalable" / "apps" / f"{APP_ID}.svg",
         _data_home() / "applications" / f"{APP_ID}.desktop",
-        _data_home() / "kio" / "servicemenus" / "rgcopy-paste.desktop",
+        *_dolphin_menus(),
+        _file_manager_action(),
         _data_home() / "nautilus-python" / "extensions" / NAUTILUS_EXTENSION,
         *(m.scripts_dir / SCRIPT_NAME for m in file_managers()),
     ]
@@ -284,6 +427,13 @@ def uninstall() -> list[Path]:
     if accels.exists():
         lines = [line for line in accels.read_text("utf-8").splitlines() if not line.endswith(SCRIPT_NAME)]
         accels.write_text("\n".join(lines) + ("\n" if lines else ""), "utf-8")
+    thunar_actions = _uninstall_thunar_action()
+    if thunar_actions:
+        removed.append(thunar_actions)
+    thunar_accels = _thunar_dir() / "accels.scm"
+    if thunar_accels.exists() and THUNAR_ACTION_PATH in thunar_accels.read_text("utf-8"):
+        _rewrite_thunar_accels(thunar_accels, takeover=False)
+        removed.append(thunar_accels)
     # Gives Paste its default Ctrl+V back in Nemo and Caja
     for accel_map in _accel_map_files().values():
         if accel_map.exists() and SCRIPT_NAME.replace(" ", "%20") in accel_map.read_text("utf-8"):

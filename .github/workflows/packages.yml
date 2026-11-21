@@ -1,7 +1,7 @@
 name: Packages and releases
 
-# Builds the .deb, .rpm, Arch and portable packages and installs each one on fresh containers of
-# its distributions. The push that changes __version__ (rgcopy/__init__.py) on standalone, a v*
+# Builds the .deb, .rpm, Arch, AppImage and portable packages for amd64 and arm64 and installs each
+# one on fresh containers of its distributions (the desktop window included, on X11 and Wayland). The push that changes __version__ (rgcopy/__init__.py) on standalone, a v*
 # tag or a run started by hand then publishes that version: the Docker image for amd64 and arm64
 # is pushed to ghcr.io and tried first, and only then the GitHub release gets every package.
 # A tag with a suffix (v2.0.0-rc1, v2.0.0-test.1) publishes a pre-release: :latest and the
@@ -31,8 +31,17 @@ concurrency:
 
 jobs:
   build:
-    name: Build
-    runs-on: ubuntu-latest
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          # Native Arm runner: the Qt web view does not build under QEMU in reasonable time
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -45,17 +54,18 @@ jobs:
         with:
           context: .
           file: packaging/linux/Dockerfile
+          platforms: linux/${{ matrix.arch }}
           outputs: type=local,dest=dist/linux
           # Otherwise BuildKit adds its provenance.json next to the packages (and to the release)
           provenance: false
-          cache-from: type=gha,scope=linux-packages
-          cache-to: type=gha,scope=linux-packages,mode=max
+          cache-from: type=gha,scope=linux-packages-${{ matrix.arch }}
+          cache-to: type=gha,scope=linux-packages-${{ matrix.arch }},mode=max
       - id: version
         name: Read the version
         run: |
-          deb=$(basename dist/linux/rgcopy_*-1_amd64.deb)
+          deb=$(basename dist/linux/rgcopy_*-1_${{ matrix.arch }}.deb)
           version=${deb#rgcopy_}
-          version=${version%-1_amd64.deb}
+          version=${version%-1_${{ matrix.arch }}.deb}
           tag="v$version"
           prerelease=false
           if [ "$GITHUB_REF_TYPE" = tag ]; then
@@ -74,70 +84,165 @@ jobs:
             echo "release-version=${tag#v}"
             echo "prerelease=$prerelease"
           } >> "$GITHUB_OUTPUT"
-      - run: ls -l dist/linux && cat dist/linux/SHA256SUMS
+      # Both architectures publish one SHA256SUMS each; the release merges them
+      - run: mv dist/linux/SHA256SUMS dist/linux/SHA256SUMS.${{ matrix.arch }} && ls -l dist/linux
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-packages
+          name: linux-packages-${{ matrix.arch }}
           path: dist/linux
           compression-level: 0
           retention-days: 30
 
   test:
-    name: Test on ${{ matrix.name }}
+    name: ${{ matrix.name }} (${{ matrix.arch }})
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: Ubuntu 24.04
-            id: ubuntu-24.04
-            image: ubuntu:24.04
-            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick
+          # ---- Debian family (.deb) -------------------------------------------------------
           - name: Ubuntu 22.04
             id: ubuntu-22.04
+            arch: amd64
             image: ubuntu:22.04
-            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick
+            install: &apt apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*.deb curl procps xvfb imagemagick
+          - name: Ubuntu 24.04, X11 and Wayland
+            id: ubuntu-24.04
+            arch: amd64
+            image: ubuntu:24.04
+            install: &apt-wayland apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*.deb curl procps xvfb imagemagick weston
+          - name: Ubuntu 26.04
+            id: ubuntu-26.04
+            arch: amd64
+            image: ubuntu:26.04
+            install: *apt
           - name: Debian 12
             id: debian-12
+            arch: amd64
             image: debian:12
-            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick
-          - name: Fedora 42
-            id: fedora-42
-            image: fedora:42
-            install: dnf install -y ./rgcopy-*.x86_64.rpm curl procps-ng xorg-x11-server-Xvfb ImageMagick
+            install: *apt
+          - name: Debian 13, X11 and Wayland
+            id: debian-13
+            arch: amd64
+            image: debian:13
+            install: *apt-wayland
+          # ---- Red Hat family (.rpm) ------------------------------------------------------
+          - name: Fedora 43
+            id: fedora-43
+            arch: amd64
+            image: fedora:43
+            install: &dnf dnf install -y ./rgcopy-*.rpm curl procps-ng xorg-x11-server-Xvfb ImageMagick
+          - name: Fedora 44, X11 and Wayland
+            id: fedora-44
+            arch: amd64
+            image: fedora:44
+            install: &dnf-wayland dnf install -y ./rgcopy-*.rpm curl procps-ng xorg-x11-server-Xvfb ImageMagick weston
+          # RHEL 9 and 10 rebuilds (Rocky and Oracle are the same packages); ImageMagick is in EPEL
+          - name: AlmaLinux 9
+            id: almalinux-9
+            arch: amd64
+            image: almalinux:9
+            # (Xvfb is optional: RHEL 10 may leave it out, and the window test then only runs elsewhere)
+            install: &el dnf install -y --allowerasing ./rgcopy-*.rpm curl procps-ng && { dnf install -y xorg-x11-server-Xvfb || true; }
+          - name: AlmaLinux 10
+            id: almalinux-10
+            arch: amd64
+            image: almalinux:10
+            install: *el
+          # ---- SUSE (.rpm) ----------------------------------------------------------------
+          - name: openSUSE Leap 16.0
+            id: opensuse-leap-16.0
+            arch: amd64
+            image: registry.opensuse.org/opensuse/leap:16.0
+            install: &zypper zypper --non-interactive install --allow-unsigned-rpm ./rgcopy-*.rpm curl procps xorg-x11-server-Xvfb ImageMagick
           - name: openSUSE Tumbleweed
             id: opensuse-tumbleweed
+            arch: amd64
             image: registry.opensuse.org/opensuse/tumbleweed:latest
-            install: zypper --non-interactive install --allow-unsigned-rpm ./rgcopy-*.x86_64.rpm curl procps xorg-x11-server-Xvfb ImageMagick
+            install: *zypper
+          # ---- Arch (.pkg.tar.zst) --------------------------------------------------------
           - name: Arch Linux
             id: archlinux
+            arch: amd64
             image: archlinux:latest
-            install: pacman -Syu --noconfirm && pacman -U --noconfirm ./rgcopy-*-x86_64.pkg.tar.zst && pacman -S --noconfirm --needed curl procps-ng xorg-server-xvfb imagemagick
+            install: pacman -Syu --noconfirm && pacman -U --noconfirm ./rgcopy-*.pkg.tar.zst && pacman -S --noconfirm --needed curl procps-ng xorg-server-xvfb imagemagick
+          # ---- Universal ------------------------------------------------------------------
           - name: the portable tarball
             id: portable
+            arch: amd64
             image: debian:12
             portable: 1
             # The .deb only brings in the libraries: the tarball's own copy is what runs
-            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*_amd64.deb curl procps xvfb imagemagick && dpkg -r rgcopy && tar -xzf rgcopy-*-linux-x86_64.tar.gz -C "$HOME" && "$HOME"/rgcopy-*-linux-x86_64/install.sh
+            install: &portable apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*.deb curl procps xvfb imagemagick && dpkg -r rgcopy && tar -xzf rgcopy-*-linux-*.tar.gz -C "$HOME" && "$HOME"/rgcopy-*-linux-*/install.sh
+          - name: the AppImage
+            id: appimage
+            arch: amd64
+            image: ubuntu:24.04
+            appimage: 1
+            # Again the .deb only brings in the libraries
+            install: &appimage apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*.deb curl procps xvfb imagemagick weston && dpkg -r rgcopy
+          # ---- arm64 (aarch64): glibc 2.39+ ------------------------------------------------
+          - name: Ubuntu 24.04, X11 and Wayland
+            id: ubuntu-24.04
+            arch: arm64
+            image: ubuntu:24.04
+            install: *apt-wayland
+          - name: Debian 13
+            id: debian-13
+            arch: arm64
+            image: debian:13
+            install: *apt
+          - name: Fedora 44
+            id: fedora-44
+            arch: arm64
+            image: fedora:44
+            install: *dnf
+          - name: AlmaLinux 10
+            id: almalinux-10
+            arch: arm64
+            image: almalinux:10
+            install: *el
+          - name: openSUSE Tumbleweed
+            id: opensuse-tumbleweed
+            arch: arm64
+            image: registry.opensuse.org/opensuse/tumbleweed:latest
+            install: *zypper
+          - name: the AppImage
+            id: appimage
+            arch: arm64
+            image: debian:13
+            appimage: 1
+            install: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ./rgcopy_*.deb curl procps xvfb imagemagick && dpkg -r rgcopy
+          - name: the portable tarball
+            id: portable
+            arch: arm64
+            image: ubuntu:24.04
+            portable: 1
+            install: *portable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: linux-packages
+          name: linux-packages-${{ matrix.arch }}
           path: pkg
       - name: Install and try it
         env:
           IMAGE: ${{ matrix.image }}
           INSTALL: ${{ matrix.install }}
           PORTABLE: ${{ matrix.portable || 0 }}
+          APPIMAGE: ${{ matrix.appimage || 0 }}
         run: |
+          chmod +x pkg/*.AppImage
+          appimage=
+          [ "$APPIMAGE" = 1 ] && appimage=/pkg/$(cd pkg && ls RGCopy-*.AppImage)
           docker run --rm -v "$PWD/pkg:/pkg" -v "$PWD/packaging/linux/smoke-test.sh:/smoke-test.sh:ro" -w /pkg \
-            -e PORTABLE -e SCREENSHOT=/pkg/window.png "$IMAGE" sh -c "$INSTALL && sh /smoke-test.sh"
+            -e PORTABLE -e APPIMAGE_FILE="$appimage" -e SCREENSHOT=/pkg/window.png "$IMAGE" \
+            sh -c "$INSTALL && sh /smoke-test.sh"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: window-${{ matrix.id }}
+          name: window-${{ matrix.id }}-${{ matrix.arch }}
           path: pkg/window.png
           if-no-files-found: ignore
           retention-days: 7
@@ -245,8 +350,11 @@ jobs:
       - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
-          name: linux-packages
+          pattern: linux-packages-*
           path: dist/linux
+          merge-multiple: true
+      - name: One SHA256SUMS for every package
+        run: cat dist/linux/SHA256SUMS.* > dist/linux/SHA256SUMS && rm dist/linux/SHA256SUMS.* && cat dist/linux/SHA256SUMS
       - name: Publish the packages
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -268,8 +376,11 @@ jobs:
           assets=$(gh release view "$TAG" --json assets -q '.assets[].name')
           echo "$assets"
           missing=0
-          for name in "rgcopy_${VERSION}-1_amd64.deb" "rgcopy-${VERSION}-1.x86_64.rpm" \
-                      "rgcopy-${VERSION}-1-x86_64.pkg.tar.zst" "rgcopy-${VERSION}-linux-x86_64.tar.gz" SHA256SUMS; do
+          for name in SHA256SUMS \
+            "rgcopy_${VERSION}-1_amd64.deb" "rgcopy-${VERSION}-1.x86_64.rpm" "rgcopy-${VERSION}-1-x86_64.pkg.tar.zst" \
+            "rgcopy-${VERSION}-linux-x86_64.tar.gz" "RGCopy-${VERSION}-x86_64.AppImage" \
+            "rgcopy_${VERSION}-1_arm64.deb" "rgcopy-${VERSION}-1.aarch64.rpm" "rgcopy-${VERSION}-1-aarch64.pkg.tar.zst" \
+            "rgcopy-${VERSION}-linux-aarch64.tar.gz" "RGCopy-${VERSION}-aarch64.AppImage"; do
             grep -qxF "$name" <<<"$assets" || { echo "::error::$TAG is missing $name"; missing=1; }
           done
           # The published files must be the ones SHA256SUMS lists

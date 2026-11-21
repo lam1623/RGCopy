@@ -23,16 +23,20 @@ Sus piezas envejecieron (Python 2, Unity, AppIndicator). **RGCopy 2** es una rec
 
 ### Paquetes para Linux
 
-Descarga el paquete de tu distribución desde la [página de releases](https://github.com/lam1623/RGCopy/releases). Los paquetes traen su propio Python y Qt; tu gestor de paquetes instala rsync y las bibliotecas de escritorio habituales.
+Descarga el paquete de tu distribución desde la [página de releases](https://github.com/lam1623/RGCopy/releases). Hay paquetes para **x86_64 (amd64)** y **aarch64 (arm64)**. Traen su propio Python y Qt; tu gestor de paquetes instala rsync y las bibliotecas de sistema (glibc, Mesa, NSS, X11/Wayland, fuentes), así que reciben las actualizaciones de seguridad de tu distribución.
 
-| Distribución | Paquete | Se instala con |
+| Distribución | Paquete (x86_64 / arm64) | Se instala con |
 | --- | --- | --- |
-| Ubuntu 22.04+, Debian 12+, Linux Mint 21+, Pop!_OS 22.04+ | `rgcopy_2.0.0-1_amd64.deb` | `sudo apt install ./rgcopy_2.0.0-1_amd64.deb` |
-| Fedora, openSUSE Tumbleweed | `rgcopy-2.0.0-1.x86_64.rpm` | `sudo dnf install ./rgcopy-2.0.0-1.x86_64.rpm` o `sudo zypper install --allow-unsigned-rpm ./rgcopy-2.0.0-1.x86_64.rpm` |
-| Arch, Manjaro, EndeavourOS | `rgcopy-2.0.0-1-x86_64.pkg.tar.zst` | `sudo pacman -U ./rgcopy-2.0.0-1-x86_64.pkg.tar.zst` |
-| Cualquier otra con glibc 2.35+ | `rgcopy-2.0.0-linux-x86_64.tar.gz` | descomprímelo y ejecuta `./rgcopy`, o `./install.sh` para añadirlo al menú |
+| Ubuntu 22.04+, Debian 12+, Linux Mint 21+, Pop!_OS, elementary, Zorin | `rgcopy_2.0.0-1_amd64.deb` / `_arm64.deb` | `sudo apt install ./rgcopy_2.0.0-1_amd64.deb` |
+| Fedora, RHEL / AlmaLinux / Rocky 9 y 10 | `rgcopy-2.0.0-1.x86_64.rpm` / `.aarch64.rpm` | `sudo dnf install ./rgcopy-2.0.0-1.x86_64.rpm` |
+| openSUSE Leap 16, Tumbleweed | `rgcopy-2.0.0-1.x86_64.rpm` / `.aarch64.rpm` | `sudo zypper install --allow-unsigned-rpm ./rgcopy-2.0.0-1.x86_64.rpm` |
+| Arch, Manjaro, EndeavourOS, CachyOS | `rgcopy-2.0.0-1-x86_64.pkg.tar.zst` / `-aarch64` | `sudo pacman -U ./rgcopy-2.0.0-1-x86_64.pkg.tar.zst` |
+| Cualquier otra (Gentoo, Void glibc, Slackware, Solus…) | `RGCopy-2.0.0-x86_64.AppImage` / `-aarch64` | `chmod +x RGCopy-*.AppImage && ./RGCopy-*.AppImage` |
+| Igual, sin AppImage | `rgcopy-2.0.0-linux-x86_64.tar.gz` / `-aarch64` | descomprímelo y ejecuta `./rgcopy`, o `./install.sh` para añadirlo al menú |
 
-Después ejecuta **una vez, con tu usuario**, `rgcopy integrate`: así Ctrl+V en Nautilus, Nemo y Caja pega con RGCopy (ver abajo). Dolphin ya tiene «Pegar con RGCopy» en su menú desde la instalación.
+Requisitos: glibc 2.34+ en x86_64 y 2.39+ en arm64 (las ruedas de Qt marcan ese mínimo), y rsync. Las distribuciones musl (Alpine, Void musl) y NixOS no pueden ejecutar los binarios: usa la imagen Docker o instala desde el código fuente.
+
+Al instalar el paquete, «Pegar con RGCopy» aparece en el menú contextual de **Dolphin** (Plasma 5 y 6), **Nemo** y **PCManFM-Qt** (LXQt) para todos los usuarios. Ejecuta además **una vez, con tu usuario**, `rgcopy integrate`: así Ctrl+V en Nautilus, Nemo, Caja y Thunar pega con RGCopy (ver abajo).
 
 Antes de publicar una versión, cada paquete se instala y se prueba en contenedores limpios de esas distribuciones (ver [Versiones](#versiones)). Para construirlos tú mismo: `make packages` (necesita Docker) los deja en `dist/linux/`.
 
@@ -58,11 +62,13 @@ La ventana nativa usa Qt WebEngine (extra `desktop`). Sin ella, RGCopy se abre e
 | Nautilus (GNOME) | RGCopy pega cuando el portapapeles tiene archivos; en campos de texto y con otro contenido pega Nautilus | Ctrl+Shift+V y el menú Scripts |
 | Nemo (Cinnamon) | RGCopy | menú Scripts |
 | Caja (MATE) | RGCopy | menú Scripts |
-| Dolphin (KDE) | el de Dolphin | «Pegar con RGCopy» en el menú contextual |
+| Thunar (Xfce) | RGCopy | «Paste with RGCopy» en el menú contextual (acción personalizada) |
+| Dolphin (KDE Plasma 5 y 6) | el de Dolphin | «Pegar con RGCopy» en el menú contextual |
+| PCManFM-Qt (LXQt), PCManFM | el del gestor | «Pegar con RGCopy» en el menú contextual |
 
 En Nautilus hace falta nautilus-python: `sudo apt install python3-nautilus` (Fedora: `nautilus-python`, Arch: `python-nautilus`). `integrate` cierra los gestores abiertos para aplicar el cambio. `rgcopy integrate --no-takeover` deja Ctrl+V al gestor, y `rgcopy integrate --uninstall` lo deshace todo.
 
-Para leer el portapapeles, RGCopy usa `wl-paste` (Wayland, paquete `wl-clipboard`) o `xclip` (X11).
+Para leer el portapapeles, RGCopy usa `wl-paste` (Wayland, paquete `wl-clipboard`) o `xclip` (X11); en Wayland, si el compositor no deja leerlo con `wl-paste`, prueba con el portapapeles de XWayland. La ventana funciona en X11 y en Wayland nativo (Qt elige el backend según la sesión; `QT_QPA_PLATFORM=xcb` fuerza X11). Desde un AppImage, `integrate` apunta al propio archivo `.AppImage`: si lo mueves, vuelve a ejecutarlo.
 
 ## Uso
 

@@ -3,16 +3,19 @@
 # and expect RGCopy (not the file manager) to copy it. Then `--uninstall` must give Ctrl+V back.
 #
 # Needs: rgcopy on PATH, Xvfb, xdotool, xclip, dbus-run-session and at least one of nautilus
-# (+ python3-nautilus, gir1.2-gtk-4.0), nemo, caja. Run it as a regular user (Nautilus refuses root):
-#   tests/e2e/paste_takeover.sh [nautilus nemo caja]
+# (+ python3-nautilus, gir1.2-gtk-4.0), nemo, caja, thunar. Run it as a regular user (Nautilus
+# refuses root):
+#   tests/e2e/paste_takeover.sh [nautilus nemo caja thunar]
 set -euo pipefail
 
-MANAGERS=("${@:-nautilus nemo caja}")
+MANAGERS=("${@:-nautilus nemo caja thunar}")
 read -r -a MANAGERS <<<"${MANAGERS[*]}"
 WORK=$(mktemp -d)
 DISPLAY_NUM=${DISPLAY_NUM:-:97}
 trap 'kill $(jobs -p) 2>/dev/null || true; [[ -n ${KEEP:-} ]] || rm -rf "$WORK"' EXIT
 
+# Keep finding a `pip install --user` rgcopy after HOME moves to the scratch directory
+export PYTHONUSERBASE=${PYTHONUSERBASE:-$(python3 -m site --user-base)}
 export HOME=$WORK/home XDG_CONFIG_HOME=$WORK/home/.config XDG_DATA_HOME=$WORK/home/.local/share
 export XDG_RUNTIME_DIR=$WORK/run RGCOPY_RUNTIME_DIR=$WORK/run/rgcopy
 export DISPLAY=$DISPLAY_NUM GDK_BACKEND=x11 NO_AT_BRIDGE=1 RGCOPY_AUTOBUILD=off
@@ -32,6 +35,7 @@ attempt() {
     nautilus) nautilus --new-window "$WORK/dst" ;;
     nemo) nemo "$WORK/dst" ;;
     caja) caja --no-desktop "$WORK/dst" ;;
+    thunar) thunar "$WORK/dst" ;;
   esac >"$WORK/$fm.log" 2>&1 </dev/null &
   sleep "${STARTUP:-9}"
   local window

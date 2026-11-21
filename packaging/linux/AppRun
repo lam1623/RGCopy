@@ -1,0 +1,6 @@
+#!/bin/sh
+# Entry point of the RGCopy AppImage. The AppImage runtime sets $APPIMAGE to the file itself, which
+# `rgcopy integrate` writes into the menu entry and the file manager hooks (the mount point under
+# /tmp changes on every run).
+here=$(dirname "$(readlink -f "$0")")
+exec "$here/usr/lib/rgcopy/rgcopy" "$@"
