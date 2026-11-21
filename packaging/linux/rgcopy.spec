@@ -108,6 +108,21 @@ while todo:
             todo.extend(by_name[name])
 a.binaries = [entry for entry in binaries if os.path.basename(entry[0]) in kept]
 
+
+def _system_library(soname):
+    out = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
+    match = re.search(rf"^\s*{re.escape(soname)} \(libc6,x86-64\) => (\S+)$", out, re.M)
+    if not match:
+        raise SystemExit(f"{soname} is not on the build system")
+    return match.group(1)
+
+
+# A fallback copy of OpenSSL 3 for distributions that moved on to a newer OpenSSL (Arch): it sits
+# outside the library path and launcher.py loads it only when the system has no libssl.so.3, so
+# wherever the distribution has one, its copy and its security updates win
+for soname in ("libcrypto.so.3", "libssl.so.3"):
+    a.binaries.append((f"openssl-compat/{soname}", _system_library(soname), "BINARY"))
+
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="rgcopy", strip=False, upx=False, console=True)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="rgcopy")

@@ -26,6 +26,29 @@ def _sandbox_available() -> bool:
     return True
 
 
+def _load_openssl_fallback() -> None:
+    """Load the bundled OpenSSL 3 when the system has none (distributions on a newer OpenSSL).
+
+    Python's ssl module needs libssl.so.3; once a library with that name is loaded, the dynamic
+    linker uses it for every later lookup, so this has to run before anything imports ssl.
+    """
+
+    import ctypes
+
+    try:
+        ctypes.CDLL("libssl.so.3")
+        return
+    except OSError:
+        pass
+    compat = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)), "openssl-compat")
+    for name in ("libcrypto.so.3", "libssl.so.3"):
+        try:
+            ctypes.CDLL(os.path.join(compat, name), mode=ctypes.RTLD_GLOBAL)
+        except OSError:
+            return
+
+
+_load_openssl_fallback()
 os.environ.setdefault("QT_API", "pyqt6")
 # The window only ever shows RGCopy's own local page; without a usable sandbox Chromium would
 # refuse to start at all
