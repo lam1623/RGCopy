@@ -149,7 +149,13 @@ def _nautilus_python_available() -> bool:
 def _glob_nautilus_python() -> list[str]:
     import glob
 
-    return glob.glob("/usr/lib*/**/nautilus/extensions-4/libnautilus-python.so", recursive=True)
+    # Fixed depths only: a recursive "**" follows symlink loops (e.g. /usr/lib/llvm-*/build)
+    # and never returns. Covers /usr/lib (Arch), /usr/lib64 (Fedora, openSUSE) and the
+    # multiarch /usr/lib/<triplet> (Debian, Ubuntu).
+    found: list[str] = []
+    for pattern in ("/usr/lib*/nautilus", "/usr/lib*/*/nautilus"):
+        found += glob.glob(f"{pattern}/extensions-4/libnautilus-python.so")
+    return found
 
 
 def quit_file_managers(names: list[str]) -> list[str]:
